@@ -28,7 +28,7 @@
   "services": {
     "send_message": {
       "name": "Nachricht senden",
-      "description": "Sendet eine Signal-Nachricht an einen oder mehrere Empfänger.",
+      "description": "Sendet eine Signal-Nachricht über signal-cli-rest-api an einen oder mehrere Empfänger.",
       "fields": {
         "message": {
           "name": "Nachricht",
@@ -36,11 +36,11 @@
         },
         "recipients": {
           "name": "Empfänger",
-          "description": "Eine Liste von Empfängern. Jeder Eintrag kann ein konfigurierter Empfängername, eine Telefonnummer im E.164-Format, ein Benutzername (u:name.1234) oder eine Gruppen-ID sein."
+          "description": "Liste der Empfänger. Jeder Eintrag kann ein konfigurierter Chat-Partnername (Groß-/Kleinschreibung egal), eine Telefonnummer im E.164-Format (z.B. +49151…), ein Signal-Benutzername mit dem Präfix 'u:' (z.B. u:alice.1234) oder eine Gruppen-ID mit dem Präfix 'group.' (z.B. group.ckRzaEd4…) sein."
         },
         "attachments": {
           "name": "Anhänge",
-          "description": "Eine optionale Liste von Base64-codierten Dateiinhalten, die an die Nachricht angehängt werden."
+          "description": "Optionale Liste von Base64-codierten Dateiinhalten, die an die Nachricht angehängt werden."
         }
       }
     }

@@ -30,6 +30,7 @@ import os
 import threading
 import time
 import uuid
+from html import escape as html_escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib import error as urlerror
@@ -60,6 +61,31 @@ DEFAULT_CONFIG: dict[str, Any] = {
 _ADDON_HOSTNAME: str | None = None
 
 _CONFIG_LOCK = threading.Lock()
+
+# --- Status cache + single-flight ------------------------------------------ #
+# How long a fetched status stays "fresh" before a refresh is attempted.
+STATUS_CACHE_TTL: float = 12.0
+# Safe placeholder returned when no status has been cached yet and a refresh is
+# already in flight (so pollers never block on the slow upstream call).
+_STATUS_PLACEHOLDER: dict[str, Any] = {
+    "linked": False,
+    "number": None,
+    "mode": "unknown",
+    "version": "",
+}
+_STATUS_LOCK = threading.Lock()            # guards _status_cache / _status_ts
+_STATUS_REFRESH_LOCK = threading.Lock()    # single-flight (non-blocking acquire)
+_status_cache: dict[str, Any] | None = None
+_status_ts: float = 0.0
+
+# --- QR cache + single-flight ---------------------------------------------- #
+# Serve a cached PNG younger than this without any upstream call.
+QR_CACHE_TTL: float = 45.0
+QR_FETCH_TIMEOUT: float = 35.0
+_QR_LOCK = threading.Lock()                # guards _qr_cache / _qr_ts
+_QR_REFRESH_LOCK = threading.Lock()        # single-flight (blocking acquire)
+_qr_cache: bytes | None = None
+_qr_ts: float = 0.0
 
 
 def log(message: str) -> None:
@@ -197,17 +223,98 @@ def signal_status() -> dict[str, Any]:
     return {"linked": linked, "number": number, "mode": mode, "version": version}
 
 
+def cached_status() -> dict[str, Any]:
+    """Return status with a TTL cache + single-flight upstream refresh.
+
+    Bounds the upstream ``/v1/accounts`` + ``/v1/about`` calls to at most one
+    concurrent request regardless of how many UI/integration pollers hit us:
+
+      * Fresh cache (younger than ``STATUS_CACHE_TTL``)  -> returned immediately.
+      * Stale cache, refresh slot free                   -> this thread refreshes.
+      * Stale cache, refresh already in flight           -> last cached value.
+      * No cache yet, refresh already in flight          -> safe placeholder.
+    """
+    global _status_cache, _status_ts
+    now = time.monotonic()
+    with _STATUS_LOCK:
+        cached = _status_cache
+        fresh = cached is not None and (now - _status_ts) < STATUS_CACHE_TTL
+    if fresh:
+        assert cached is not None
+        return cached
+
+    # Stale or empty: try to become the single refresher (non-blocking).
+    if _STATUS_REFRESH_LOCK.acquire(blocking=False):
+        try:
+            result = signal_status()
+            with _STATUS_LOCK:
+                _status_cache = result
+                _status_ts = time.monotonic()
+            return result
+        finally:
+            _STATUS_REFRESH_LOCK.release()
+
+    # A refresh is already in flight; never make a concurrent upstream call.
+    if cached is not None:
+        return cached
+    return dict(_STATUS_PLACEHOLDER)
+
+
 def signal_qrcode(device_name: str) -> bytes | None:
     """Fetch a fresh device-linking QR PNG; None if unreachable."""
     qs = urlparse.urlencode({"device_name": device_name})
     url = f"{SIGNAL_API_URL}/v1/qrcodelink?{qs}"
     try:
         req = urlrequest.Request(url, method="GET")
-        with urlrequest.urlopen(req, timeout=8.0) as resp:
+        with urlrequest.urlopen(req, timeout=QR_FETCH_TIMEOUT) as resp:
             return resp.read()
     except (urlerror.URLError, OSError) as exc:
         log(f"qrcode unreachable: {exc!r}")
         return None
+
+
+def cached_qrcode(device_name: str) -> bytes | None:
+    """Return a QR PNG with a TTL cache + single-flight upstream fetch.
+
+    * A cached PNG younger than ``QR_CACHE_TTL`` is served directly.
+    * Otherwise exactly one thread fetches a fresh PNG (single-flight); other
+      concurrent callers serve the last-good cached PNG if available, else wait
+      for the in-flight fetch result.
+    * On a failed fetch, a previously cached PNG (if any) is returned so the UI
+      never goes blank once it has shown a code; only a fetch failure with *no*
+      cached PNG at all returns ``None``.
+    """
+    global _qr_cache, _qr_ts
+    now = time.monotonic()
+    with _QR_LOCK:
+        cached = _qr_cache
+        fresh = cached is not None and (now - _qr_ts) < QR_CACHE_TTL
+    if fresh:
+        return cached
+
+    # Single-flight: only one upstream QR fetch at a time.
+    if _QR_REFRESH_LOCK.acquire(blocking=False):
+        try:
+            png = signal_qrcode(device_name)
+            if png is not None:
+                with _QR_LOCK:
+                    _qr_cache = png
+                    _qr_ts = time.monotonic()
+                return png
+            # Fetch failed: fall back to the last-good cached PNG if we have one.
+            with _QR_LOCK:
+                return _qr_cache
+        finally:
+            _QR_REFRESH_LOCK.release()
+
+    # A fetch is already in flight. Prefer serving the last-good cached PNG.
+    if cached is not None:
+        return cached
+    # No cached PNG yet: wait for the in-flight fetch to finish, then serve
+    # whatever it produced (single-flight ensures we don't start our own call).
+    with _QR_REFRESH_LOCK:
+        with _QR_LOCK:
+            return _qr_cache
 
 
 # --------------------------------------------------------------------------- #
@@ -356,7 +463,23 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(data)
 
+    def _ingress_base_href(self) -> str:
+        """Derive a ``<base href>`` value from the HA ingress path header.
+
+        HA sets ``X-Ingress-Path`` to the ingress base path (e.g.
+        ``/api/hassio_ingress/<token>``). We return that path with a trailing
+        slash so relative URLs resolve correctly; if the header is absent we
+        fall back to ``./``. The value is HTML-escaped defensively.
+        """
+        ingress_path = self.headers.get("X-Ingress-Path", "") or ""
+        ingress_path = ingress_path.strip()
+        if not ingress_path:
+            return "./"
+        href = ingress_path.rstrip("/") + "/"
+        return html_escape(href, quote=True)
+
     def _send_html(self, html: str) -> None:
+        html = html.replace("<!--BASE-->", f'<base href="{self._ingress_base_href()}">')
         body = html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -422,14 +545,14 @@ class Handler(BaseHTTPRequestHandler):
 
         # ----- /api/status ------------------------------------------- #
         if path == "/api/status" and method == "GET":
-            self._send_json(signal_status())
+            self._send_json(cached_status())
             return
 
         # ----- /api/qrcode ------------------------------------------- #
         if path == "/api/qrcode" and method == "GET":
             with _CONFIG_LOCK:
                 device_name = load_config()["device_name"]
-            png = signal_qrcode(device_name)
+            png = cached_qrcode(device_name)
             if png is None:
                 self._send_json({"error": "signal-cli unreachable"}, status=503)
                 return
@@ -478,7 +601,7 @@ class Handler(BaseHTTPRequestHandler):
     def _build_config_response(self) -> dict[str, Any]:
         with _CONFIG_LOCK:
             cfg = load_config()
-        status = signal_status()
+        status = cached_status()
         api_url: str | None = None
         if _ADDON_HOSTNAME:
             api_url = f"http://{_ADDON_HOSTNAME}:8080"
@@ -596,6 +719,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!--BASE-->
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Signalbot</title>
 <style>
@@ -787,8 +911,9 @@ INDEX_HTML = r"""<!DOCTYPE html>
       <li>Scan the QR code below.</li>
     </ol>
     <div class="qrbox">
-      <img id="qrImg" alt="Signal device-linking QR code" src="api/qrcode">
-      <div class="hint">The code refreshes automatically every 30 seconds.</div>
+      <img id="qrImg" alt="Signal device-linking QR code" src="./api/qrcode">
+      <div id="qrLoading" class="hint">Generating link code…</div>
+      <div class="hint">The code refreshes automatically every 45 seconds.</div>
     </div>
   </section>
 
@@ -865,11 +990,14 @@ INDEX_HTML = r"""<!DOCTYPE html>
 (function () {
   "use strict";
 
-  var QR_REFRESH_MS = 30000;
-  var STATUS_POLL_MS = 4000;
+  var QR_REFRESH_MS = 45000;
+  var STATUS_POLL_MS = 7000;
 
   var qrTimer = null;
   var wasLinked = null; // null = unknown yet
+  var statusInFlight = false; // skip overlapping status polls
+  var qrLoadPending = false;   // a QR <img> load is currently in progress
+  var qrEverLoaded = false;    // we have successfully shown at least one QR
 
   function $(id) { return document.getElementById(id); }
 
@@ -945,9 +1073,20 @@ INDEX_HTML = r"""<!DOCTYPE html>
   function stopQrRefresh() {
     if (qrTimer) { clearInterval(qrTimer); qrTimer = null; }
   }
+  function setQrHint(text) {
+    var hint = $("qrLoading");
+    if (!hint) return;
+    if (text) { hint.textContent = text; hint.classList.remove("hidden"); }
+    else { hint.classList.add("hidden"); }
+  }
   function refreshQr() {
     var img = $("qrImg");
-    if (img) img.src = "api/qrcode?ts=" + Date.now();
+    if (!img) return;
+    // Don't reassign src while a previous load is still pending.
+    if (qrLoadPending) return;
+    qrLoadPending = true;
+    if (!qrEverLoaded) setQrHint("Generating link code…");
+    img.src = "./api/qrcode?ts=" + Date.now();
   }
 
   function showUnlinked() {
@@ -967,9 +1106,12 @@ INDEX_HTML = r"""<!DOCTYPE html>
   }
 
   function pollStatus() {
-    api("api/status")
+    if (statusInFlight) return; // in-flight guard: avoid request pile-up
+    statusInFlight = true;
+    api("./api/status")
       .then(applyStatus)
-      .catch(function () { applyStatus(null); });
+      .catch(function () { applyStatus(null); })
+      .then(function () { statusInFlight = false; });
   }
 
   // ---- recipients --------------------------------------------------- //
@@ -1065,7 +1207,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
       errEl.textContent = "";
       if (!body.name) { errEl.textContent = "Name is required"; return; }
       if (!body.phone_number && !body.username) { errEl.textContent = "Provide a phone number or username"; return; }
-      api("api/recipients/" + encodeURIComponent(r.id), {
+      api("./api/recipients/" + encodeURIComponent(r.id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -1079,13 +1221,13 @@ INDEX_HTML = r"""<!DOCTYPE html>
 
   function deleteRecipient(r, row) {
     if (!confirm('Delete "' + r.name + '"?')) return;
-    api("api/recipients/" + encodeURIComponent(r.id), { method: "DELETE" })
+    api("./api/recipients/" + encodeURIComponent(r.id), { method: "DELETE" })
       .then(function () { toast("Chat partner removed", "ok"); loadRecipients(); })
       .catch(function (e) { toast(e.message, "err"); });
   }
 
   function loadRecipients() {
-    api("api/recipients")
+    api("./api/recipients")
       .then(renderRecipients)
       .catch(function (e) { toast("Could not load chat partners: " + e.message, "err"); });
   }
@@ -1104,7 +1246,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
       errEl.textContent = "Provide at least a phone number or a username";
       return;
     }
-    api("api/recipients", {
+    api("./api/recipients", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
@@ -1121,7 +1263,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
   // ---- settings ----------------------------------------------------- //
 
   function loadSettings() {
-    api("api/config")
+    api("./api/config")
       .then(function (cfg) {
         $("setKnown").checked = !!cfg.known_senders_only;
         $("setPoll").value = cfg.poll_interval;
@@ -1137,7 +1279,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
     if (isNaN(poll) || poll < 2) { errEl.textContent = "Poll interval must be at least 2"; return; }
     var device = $("setDevice").value.trim();
     if (!device) { errEl.textContent = "Device name is required"; return; }
-    api("api/settings", {
+    api("./api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1153,7 +1295,20 @@ INDEX_HTML = r"""<!DOCTYPE html>
 
   $("addBtn").addEventListener("click", addRecipient);
   $("saveSettings").addEventListener("click", saveSettings);
-  $("qrImg").addEventListener("error", function () { /* keep last good image */ });
+  $("qrImg").addEventListener("load", function () {
+    // A QR image finished loading: clear the in-flight guard, remember we've
+    // shown at least one good code, and hide the loading hint.
+    qrLoadPending = false;
+    qrEverLoaded = true;
+    setQrHint("");
+  });
+  $("qrImg").addEventListener("error", function () {
+    // Fetch/render failed: keep the last good image, just clear the guard so
+    // the next refresh can try again, and show a subtle retry hint.
+    qrLoadPending = false;
+    if (qrEverLoaded) setQrHint("Couldn’t refresh the code — retrying…");
+    else setQrHint("Generating link code…");
+  });
 
   pollStatus();
   setInterval(pollStatus, STATUS_POLL_MS);

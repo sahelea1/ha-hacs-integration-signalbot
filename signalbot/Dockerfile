@@ -15,7 +15,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Runtime environment
-ENV MODE=normal \
+ENV MODE=native \
     SIGNAL_CLI_CONFIG_DIR=/data/signal-cli \
     SIGNAL_API_URL=http://127.0.0.1:8080 \
     SIGNALBOT_MANAGER_PORT=8099
