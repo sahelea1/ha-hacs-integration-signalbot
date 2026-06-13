@@ -1,13 +1,13 @@
 # Signalbot for Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![Add-on version](https://img.shields.io/badge/add--on-v1.1.0-blue)](signalbot/CHANGELOG.md)
+[![Integration version](https://img.shields.io/badge/integration-v0.3.0-blue)](custom_components/signalbot)
 
 Send and receive [Signal](https://signal.org) messages directly from Home Assistant automations. This repository ships **two components that work together**:
 
 1. A **Home Assistant Add-on** (`signalbot/`) — bundles `signal-cli-rest-api` and a setup/management web UI. Handles Signal account linking and chat-partner management for you.
 2. A **HACS custom integration** (`custom_components/signalbot/`) — auto-discovered once the add-on is running. Creates notify entities, sensors, and events in Home Assistant.
-
-> **Add-on repo for HA:** add `https://github.com/sahelea1/ha-hacs-integration-signalbot` in Settings → Add-ons → Add-on Store → three-dot menu → Repositories.
 
 ---
 
@@ -31,24 +31,26 @@ Home Assistant automations & scripts
 ```
 
 - The **add-on** runs `signal-cli-rest-api` internally so you do not need to manage it yourself.
-- On first run the add-on Web UI presents a **QR code** (auto-refreshes every 30 seconds). Scan it with the Signal app to link HA as a linked device.
-- Chat partners (each with a phone number and/or @username) are added one by one in the add-on Web UI.
+- On first run the add-on Web UI shows a **QR code**. Scan it with the Signal app to link Home Assistant as a linked device.
+- Chat partners (each with a name, phone number in E.164 format, and/or Signal username) are added in the add-on Web UI.
 - The add-on announces itself to HA via **Supervisor discovery** — no manual URL entry is needed.
 - The integration creates one `notify.signalbot_<name>` entity per chat partner, two sensors, and fires a `signalbot_message_received` event for incoming messages.
-- Only messages from **configured chat partners** trigger the event ("known senders only", togglable in the add-on UI).
+- Only messages from **configured chat partners** trigger the event (togglable in the add-on UI).
 
 ---
 
 ## Requirements
 
 - **Home Assistant OS** or **Home Assistant Supervised** (required for add-ons).
-- The Signalbot HACS integration installed (so the auto-discovered entry has something to load).
+- The Signalbot HACS integration installed alongside the add-on.
 
 > **HA Container / Core users:** Add-ons are not available on these installs. You would need to run `signal-cli-rest-api` yourself and configure the integration manually. The add-on path (HA OS / Supervised) is the fully supported and documented setup.
 
 ---
 
 ## Installation
+
+Install both parts in order. The add-on provides the Signal backend; the integration wires it into Home Assistant entities and events.
 
 ### 1. Add-on
 
@@ -66,88 +68,152 @@ Home Assistant automations & scripts
 4. Search for **Signalbot** and click **Download**.
 5. **Restart Home Assistant.**
 
-Once HA restarts with the add-on running, Supervisor discovery will surface the integration automatically. You may still need to confirm it under **Settings → Devices & Services**.
+Once HA restarts with the add-on already running, Supervisor discovery surfaces the integration automatically. Confirm it under **Settings → Devices & Services**.
 
 ---
 
 ## First-run setup
 
-1. Open the **Signalbot** add-on page and click **Open Web UI** (or use the ingress panel).
-2. A QR code is displayed. It auto-refreshes every 30 seconds.
-3. On your phone open **Signal → Settings → Linked devices → Link new device** and scan the QR code.
-4. Once linked, switch to the **Chat partners** tab in the Web UI.
-5. Add each chat partner with a friendly name plus their phone number (E.164, e.g. `+49151123456789`) and/or Signal @username.
-6. In Home Assistant, go to **Settings → Devices & Services**. The Signalbot integration should appear as discovered — click **Add** to confirm.
+1. Open the **Signalbot** add-on page and click **Open Web UI**.
+2. A QR code is displayed. On your phone open **Signal → Settings → Linked devices → Link new device** and scan it.
+3. Once linked, the Web UI switches to show **Chat partners** and **Settings**, and the status pill shows "Connected as +49…".
+4. In the **Chat partners** section, add each person you want to message: give them a friendly name and enter their phone number in E.164 format (e.g. `+4915123456789`) and/or their Signal username. Use the "prefer" toggle to choose which identifier to use when both are set.
+5. In Home Assistant, go to **Settings → Devices & Services**. The Signalbot integration should appear as discovered — click **Add** to confirm.
 
 ---
 
 ## Usage
 
-### Sending a message via a notify entity
+### Sending messages
+
+#### Via a per-partner notify entity
+
+Each chat partner becomes a `notify.signalbot_<name>` entity. Use it directly in automations:
 
 ```yaml
-service: notify.signalbot_alice
-data:
-  message: "The front door was opened!"
+- service: notify.signalbot_alice
+  data:
+    message: "Motion detected in the hallway!"
 ```
 
-### Using the signalbot.send_message service
+#### Via the `signalbot.send_message` service (multi-recipient + attachments)
+
+`recipients` accepts a configured chat-partner **name** (case-insensitive), an **E.164 phone number**, a **Signal username** (prefix `u:`), or a **group ID** (prefix `group.`):
 
 ```yaml
-service: signalbot.send_message
-data:
-  message: "Motion detected in the garage."
-  recipients:
-    - "+49151123456789"
-    - "@alice.01"
-  attachments:
-    - /config/www/snapshot.jpg
+- service: signalbot.send_message
+  data:
+    message: "Hello from Home Assistant 👋"
+    recipients:
+      - "Alice"
+      - "+4915123456789"
+    attachments:            # optional — pass base64-encoded file data as strings
+      - "<base64-string>"
 ```
+
+---
 
 ### Reacting to incoming messages
 
-The `signalbot_message_received` event is fired for every incoming message from a known sender.
-
-Event data fields:
+Every incoming text message from a known sender fires the **`signalbot_message_received`** event. Event data fields:
 
 | Field | Description |
 |---|---|
-| `recipient_name` | Friendly name of the configured chat partner |
-| `source` | Sender phone number or @username |
-| `message` | Message text |
+| `source` | Sender's phone number (E.164) |
+| `source_uuid` | Sender's Signal UUID |
+| `source_name` | Sender's display name (if known) |
+| `message` | Full message text |
 | `timestamp` | Unix timestamp of the message |
+| `recipient_id` | Internal recipient identifier |
+| `recipient_name` | Friendly name of the configured chat partner |
+| `command` | First token lowercased if message starts with `/`, otherwise `null` |
+| `command_args` | Remainder of the message after the command token, or `null` |
+| `config_entry_id` | ID of the Signalbot config entry |
 
-Only messages from **configured chat partners** fire the event (known-senders allowlist). Toggle this behaviour in the add-on Web UI.
+**`command` parsing:** if the message text starts with `/`, the integration splits it into a command and arguments. For example, the message `/lights off` produces `command: "/lights"` and `command_args: "off"`. This makes it easy to build a simple command dispatcher without string parsing in templates.
 
-Example automation:
+#### Example 1 — Echo every incoming message back to the sender
 
 ```yaml
 automation:
-  alias: "Signal command — turn on lights"
+  alias: "Signal — echo reply"
+  trigger:
+    - platform: event
+      event_type: signalbot_message_received
+  action:
+    - service: notify.signalbot_alice
+      data:
+        message: "You said: {{ trigger.event.data.message }}"
+```
+
+#### Example 2 — Respond to a `/status` command
+
+```yaml
+automation:
+  alias: "Signal — /status command"
   trigger:
     - platform: event
       event_type: signalbot_message_received
       event_data:
-        recipient_name: "Alice"
-        message: "turn on lights"
+        command: "/status"
+  action:
+    - service: signalbot.send_message
+      data:
+        message: "House is armed. Temp: {{ states('sensor.living_room_temperature') }}°C"
+        recipients:
+          - "{{ trigger.event.data.source }}"   # reply to whoever asked
+```
+
+#### Example 3 — Act only on messages from a specific sender
+
+Filter by `recipient_name` (the friendly name you gave the chat partner) or by `source` (the sender's E.164 phone number):
+
+```yaml
+automation:
+  alias: "Signal — only from Alice (by partner name)"
+  trigger:
+    - platform: event
+      event_type: signalbot_message_received
+      event_data:
+        recipient_name: "Alice"   # matches the friendly name set in the add-on UI
   action:
     - service: light.turn_on
       target:
         area_id: living_room
 ```
 
+```yaml
+automation:
+  alias: "Signal — only from a specific number"
+  trigger:
+    - platform: event
+      event_type: signalbot_message_received
+      event_data:
+        source: "+4915123456789"  # match by sender phone number
+  action:
+    - service: light.turn_on
+      target:
+        area_id: living_room
+```
+
+Only messages from **configured chat partners** fire the event (known-senders allowlist). Toggle this behaviour in the add-on Web UI.
+
+---
+
 ### Sensors
 
 | Entity | Description |
 |---|---|
-| `sensor.signalbot_last_message` | Text of the most recently received message |
+| `sensor.signalbot_last_message` | Text of the most recently received message. Attributes include `source`, `source_name`, `command`, `command_args`, and more. |
 | `sensor.signalbot_link_status` | Account link state: `linked`, `unlinked`, or `error` |
+
+> **Dashboard tip:** `sensor.signalbot_last_message` is a handy alternative to event-based automations when you just want to display the last incoming message on a Lovelace card, or read it from a template sensor.
 
 ---
 
 ## Configuration
 
-All runtime configuration — chat partners, the known-senders allowlist, and the receive poll interval — is managed in the **Signalbot add-on Web UI**. No YAML editing is required.
+All runtime configuration — chat partners, the known-senders allowlist, and the receive poll interval — is managed in the **Signalbot add-on Web UI**. The add-on's **Configuration** tab also exposes a `mode` option for selecting the signal-cli execution mode (see the add-on docs for details).
 
 ---
 
@@ -160,15 +226,20 @@ All runtime configuration — chat partners, the known-senders allowlist, and th
 
 **QR code does not appear or times out**
 - Open the add-on log tab for error messages.
-- Refresh the Web UI — the QR code auto-refreshes every 30 seconds.
-- If linking fails, restart the add-on and try again.
+- Refresh the Web UI page. If the code still does not appear, restart the add-on.
+
+**High CPU or RAM usage**
+- Open the add-on **Configuration** tab and confirm `mode` is set to `native` (the default). The `native` mode uses a GraalVM binary and is significantly lighter than `normal` mode.
+- Avoid leaving the Web UI open longer than needed — the UI polls status periodically.
+- On 32-bit (`armv7`) hardware the add-on automatically falls back from `native` to `normal`.
 
 **signal-cli is unreachable**
 - The add-on bundles signal-cli-rest-api, so it starts automatically. Check the add-on log for startup errors.
 - Ensure the add-on has network access (no unusual HA network restrictions).
 
 **Re-linking the Signal account**
-- Open the add-on Web UI, navigate to **Account** and choose **Unlink / re-link**. A fresh QR code will be generated.
+- On your phone, open **Signal → Settings → Linked devices**, tap the Home Assistant device and **remove** it.
+- Reopen the add-on Web UI: once the account is no longer linked, the add-on automatically shows a fresh QR code to link again.
 
 **Entities missing after adding a chat partner**
 - Reload the integration: Settings → Devices & Services → Signalbot → three-dot menu → Reload.

@@ -14,6 +14,19 @@
 #
 set -e
 
+# 0. Apply the user-selected signal-cli mode from the add-on options.
+#    Only "normal" and "native" are supported (per-request modes that work with
+#    our supervisord overlay). Anything else falls back to the env default
+#    (native), set in the Dockerfile.
+SEL_MODE=""
+if [ -f /data/options.json ]; then
+    SEL_MODE="$(jq -r '.mode // empty' /data/options.json 2>/dev/null || true)"
+fi
+case "$SEL_MODE" in
+    normal|native) export MODE="$SEL_MODE" ;;
+    *) export MODE="${MODE:-native}" ;;
+esac
+
 # 1. Ensure data directory exists
 mkdir -p "${SIGNAL_CLI_CONFIG_DIR:-/data/signal-cli}"
 

@@ -223,6 +223,15 @@ class SignalbotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             recipient_id = matched.get(CONF_ID) if matched else None
             recipient_name = matched.get(CONF_RECIPIENT_NAME) if matched else None
 
+            stripped = text.strip()
+            if stripped.startswith("/"):
+                parts = stripped.split(maxsplit=1)
+                command: str | None = parts[0].lower()
+                command_args: str | None = parts[1].strip() if len(parts) > 1 else ""
+            else:
+                command = None
+                command_args = None
+
             message: dict[str, Any] = {
                 "source": source,
                 "source_uuid": source_uuid,
@@ -231,6 +240,8 @@ class SignalbotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "timestamp": envelope.get("timestamp"),
                 "recipient_id": recipient_id,
                 "recipient_name": recipient_name,
+                "command": command,
+                "command_args": command_args,
             }
 
             self.last_message = message

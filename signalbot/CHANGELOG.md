@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+
+- **`native` mode is now the default** — signal-cli runs as a GraalVM native binary out of the box, delivering much lower CPU and RAM usage. On 32-bit (`armv7`) hardware the add-on automatically falls back to `normal`.
+- **`mode` configuration option** — choose between `native` (default, recommended) and `normal` (JVM, higher resource use) in the add-on Configuration tab.
+- **Fixed blank ingress QR / Web UI** — corrected the ingress base path so the QR code and manager UI load correctly when accessed through the HA Ingress proxy.
+- **Status and QR caching with request throttling** — the manager now caches status and QR-code responses to prevent bursts of requests from overloading signal-cli and causing high CPU/RAM spikes.
+- **`/command` parsing in incoming-message events** — messages starting with `/` are automatically split into a `command` field (first token, lowercased) and a `command_args` field (remainder). This makes it straightforward to build command-dispatching automations without string manipulation in templates.
+
 ## 1.0.0
 
 ### Initial release

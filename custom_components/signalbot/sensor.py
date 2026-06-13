@@ -131,4 +131,6 @@ class SignalbotLastMessageSensor(_SignalbotBaseSensor):
             "timestamp": message.get("timestamp"),
             "recipient_name": message.get("recipient_name"),
             "full_message": message.get("message"),
+            "command": message.get("command"),
+            "command_args": message.get("command_args"),
         }
