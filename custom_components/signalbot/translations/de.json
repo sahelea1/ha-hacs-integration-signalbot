@@ -128,7 +128,11 @@
         "description": "Konfiguriere, ob Home Assistant eingehende Signal-Nachrichten abruft und wie oft.",
         "data": {
           "receive_enabled": "Eingehende Nachrichten empfangen",
-          "poll_interval": "Abrufintervall (Sekunden)"
+          "poll_interval": "Abrufintervall (Sekunden)",
+          "known_senders_only": "Nur auf bekannte Absender reagieren"
+        },
+        "data_description": {
+          "known_senders_only": "Wenn aktiviert, werden eingehende Nachrichten von Absendern, die nicht als Empfänger konfiguriert sind, ignoriert."
         }
       }
     },

@@ -24,6 +24,7 @@ from .const import (
     CONF_API_URL,
     CONF_DEVICE_NAME,
     CONF_ID,
+    CONF_KNOWN_SENDERS_ONLY,
     CONF_NUMBER,
     CONF_PHONE,
     CONF_POLL_INTERVAL,
@@ -34,6 +35,7 @@ from .const import (
     CONF_USERNAME,
     DEFAULT_API_URL,
     DEFAULT_DEVICE_NAME,
+    DEFAULT_KNOWN_SENDERS_ONLY,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     MIN_POLL_INTERVAL,
@@ -448,6 +450,9 @@ class SignalbotOptionsFlow(OptionsFlow):
         self._poll_interval: int = options.get(
             CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
         )
+        self._known_senders_only: bool = options.get(
+            CONF_KNOWN_SENDERS_ONLY, DEFAULT_KNOWN_SENDERS_ONLY
+        )
         self._edit_id: str | None = None
 
     # ------------------------------------------------------------------
@@ -460,6 +465,7 @@ class SignalbotOptionsFlow(OptionsFlow):
                 CONF_RECIPIENTS: self._recipients,
                 CONF_RECEIVE_ENABLED: self._receive_enabled,
                 CONF_POLL_INTERVAL: self._poll_interval,
+                CONF_KNOWN_SENDERS_ONLY: self._known_senders_only,
             },
         )
 
@@ -631,10 +637,11 @@ class SignalbotOptionsFlow(OptionsFlow):
     async def async_step_settings(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Edit receive_enabled and poll_interval."""
+        """Edit receive_enabled, poll_interval, and known_senders_only."""
         if user_input is not None:
             self._receive_enabled = bool(user_input[CONF_RECEIVE_ENABLED])
             self._poll_interval = int(user_input[CONF_POLL_INTERVAL])
+            self._known_senders_only = bool(user_input[CONF_KNOWN_SENDERS_ONLY])
             return self._save()
 
         schema = vol.Schema(
@@ -652,6 +659,9 @@ class SignalbotOptionsFlow(OptionsFlow):
                         unit_of_measurement="s",
                     )
                 ),
+                vol.Required(
+                    CONF_KNOWN_SENDERS_ONLY, default=self._known_senders_only
+                ): selector.BooleanSelector(),
             }
         )
         return self.async_show_form(step_id="settings", data_schema=schema)

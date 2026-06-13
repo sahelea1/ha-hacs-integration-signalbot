@@ -128,7 +128,11 @@
         "description": "Configure whether Home Assistant polls for incoming Signal messages and how often.",
         "data": {
           "receive_enabled": "Receive incoming messages",
-          "poll_interval": "Poll interval (seconds)"
+          "poll_interval": "Poll interval (seconds)",
+          "known_senders_only": "Only react to known senders"
+        },
+        "data_description": {
+          "known_senders_only": "When enabled, incoming messages from senders that are not configured as recipients are ignored."
         }
       }
     },

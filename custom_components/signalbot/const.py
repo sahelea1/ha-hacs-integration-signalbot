@@ -18,6 +18,7 @@ CONF_DEVICE_NAME = "device_name"
 CONF_RECIPIENTS = "recipients"
 CONF_RECEIVE_ENABLED = "receive_enabled"
 CONF_POLL_INTERVAL = "poll_interval"
+CONF_KNOWN_SENDERS_ONLY = "known_senders_only"
 
 # Recipient dict keys
 CONF_ID = "id"
@@ -34,6 +35,7 @@ DEFAULT_API_URL = "http://localhost:8080"
 DEFAULT_DEVICE_NAME = "Home Assistant"
 DEFAULT_POLL_INTERVAL = 5
 MIN_POLL_INTERVAL = 2
+DEFAULT_KNOWN_SENDERS_ONLY = True
 
 EVENT_MESSAGE_RECEIVED = "signalbot_message_received"
 
@@ -88,4 +90,22 @@ def format_recipient(recipient: dict) -> str | None:
         if username:
             return _format_username(username)
 
+    return None
+
+
+def match_recipient(recipients: list[dict], source: str | None, source_uuid: str | None = None) -> dict | None:
+    """Return the configured recipient that matches an incoming message sender, else None.
+
+    Matching is by phone number (E.164) against each recipient's CONF_PHONE, comparing
+    whitespace-stripped values. (Signal receive envelopes identify the sender by phone
+    number / UUID, not by @username, so username-only recipients cannot be matched on
+    incoming messages — they can still be messaged TO. This is a Signal limitation.)
+    """
+    if not source:
+        return None
+    normalized_source = source.strip()
+    for recipient in recipients:
+        phone: str = (recipient.get(CONF_PHONE) or "").strip()
+        if phone and phone == normalized_source:
+            return recipient
     return None

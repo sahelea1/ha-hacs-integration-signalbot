@@ -11,12 +11,18 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import SignalApiClient, SignalApiError
 from .const import (
+    CONF_ID,
+    CONF_KNOWN_SENDERS_ONLY,
     CONF_NUMBER,
     CONF_POLL_INTERVAL,
     CONF_RECEIVE_ENABLED,
+    CONF_RECIPIENT_NAME,
+    CONF_RECIPIENTS,
+    DEFAULT_KNOWN_SENDERS_ONLY,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     EVENT_MESSAGE_RECEIVED,
+    match_recipient,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -116,6 +122,11 @@ class SignalbotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Error while receiving Signal messages: %s", err)
             return
 
+        recipients: list[dict] = list(self.entry.options.get(CONF_RECIPIENTS, []))
+        known_senders_only: bool = self.entry.options.get(
+            CONF_KNOWN_SENDERS_ONLY, DEFAULT_KNOWN_SENDERS_ONLY
+        )
+
         for item in envelopes:
             if not isinstance(item, dict):
                 continue
@@ -130,16 +141,30 @@ class SignalbotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not text:
                 continue
 
+            source: str | None = envelope.get("source") or envelope.get("sourceNumber")
+            source_uuid: str | None = envelope.get("sourceUuid")
+
+            matched: dict | None = match_recipient(recipients, source, source_uuid)
+
+            if known_senders_only and matched is None:
+                # Sender is not in the configured recipients list — silently ignore.
+                continue
+
             group_info = data_message.get("groupInfo")
             group_id: str | None = None
             if isinstance(group_info, dict):
                 group_id = group_info.get("groupId")
 
+            recipient_id: str | None = matched.get(CONF_ID) if matched else None
+            recipient_name: str | None = matched.get(CONF_RECIPIENT_NAME) if matched else None
+
             message: dict[str, Any] = {
-                "source": envelope.get("source") or envelope.get("sourceNumber"),
+                "source": source,
                 "source_name": envelope.get("sourceName"),
                 "message": text,
                 "timestamp": envelope.get("timestamp"),
+                "recipient_id": recipient_id,
+                "recipient_name": recipient_name,
             }
             if group_id:
                 message["group_id"] = group_id
