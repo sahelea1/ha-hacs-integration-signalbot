@@ -1,0 +1,39 @@
+send_message:
+  name: Send message
+  description: >-
+    Send a Signal message via signal-cli-rest-api. With multiple configured
+    accounts, the first loaded account is used to send.
+  fields:
+    message:
+      name: Message
+      description: The text body of the message to send.
+      required: true
+      example: "Hello from Home Assistant!"
+      selector:
+        text:
+          multiline: true
+    recipients:
+      name: Recipients
+      description: >-
+        List of recipients. Each entry may be a configured recipient name
+        (case-insensitive), a phone number in E.164 format (e.g. +15551234567),
+        a username with the 'u:' prefix (e.g. u:alice.1234), or a group id
+        (e.g. group.ckRzaEd4VmRzNnJaASAEsasa).
+      required: true
+      example:
+        - "+15551234567"
+        - "u:alice.1234"
+      selector:
+        text:
+          multiple: true
+    attachments:
+      name: Attachments
+      description: >-
+        Optional list of base64-encoded attachment strings to include with the
+        message.
+      required: false
+      example:
+        - "iVBORw0KGgoAAAANS..."
+      selector:
+        text:
+          multiple: true

@@ -43,20 +43,18 @@ ATTR_MESSAGE = "message"
 ATTR_RECIPIENTS = "recipients"
 ATTR_ATTACHMENTS = "attachments"
 
-# NOTE: The exact username address format expected by signal-cli-rest-api has not
-# been verified against the API source or documentation (no .dev/research.md found).
-# signal-cli-rest-api may expect usernames in the form "username.discriminator",
-# as a bare string, or with a prefix such as "u:username". Verify against
-# https://github.com/bbernhard/signal-cli-rest-api and update _format_username()
-# and USERNAME_ADDRESS_PREFIX below if needed.
-USERNAME_ADDRESS_PREFIX: str = ""  # Set to e.g. "u:" if the API requires a prefix.
+# NOTE: Confirmed against .dev/research.md (signal-cli man page / signal-cli-rest-api):
+# Signal usernames require a "u:" prefix when used as a recipient address, e.g.
+# "u:alice.1234". The prefix is passed through directly to signal-cli, which
+# resolves the username internally (there is no separate resolve endpoint).
+USERNAME_ADDRESS_PREFIX: str = "u:"  # Confirmed required prefix for usernames.
 
 
 def _format_username(username: str) -> str:
     """Return the username in the address format expected by signal-cli-rest-api.
 
-    Adjust USERNAME_ADDRESS_PREFIX or the logic here once the exact format is
-    confirmed against the signal-cli-rest-api documentation/source.
+    Signal usernames require the ``u:`` prefix (per .dev/research.md). The prefix
+    is added only if not already present, to avoid double-prefixing.
     """
     username = username.strip()
     if not username:

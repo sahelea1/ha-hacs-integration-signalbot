@@ -174,6 +174,50 @@ class SignalApiClient:
         )
         return result
 
+    async def async_qrcodelink_uri(self, device_name: str) -> str:
+        """Return the raw sgnl:// device-link URI (from GET /v1/qrcodelink/raw).
+
+        Endpoint: ``GET /v1/qrcodelink/raw?device_name=<device_name>``
+
+        The response is JSON of the form
+        ``{"DeviceLinkUri": "sgnl://linkdevice?uuid=...&pub_key=..."}``.  This
+        raw URI can be rendered client-side (e.g. by Home Assistant's
+        ``QrCodeSelector``) instead of serving a server-rendered PNG.
+
+        Args:
+            device_name: Human-readable name shown to the primary device during
+                the linking flow (e.g. ``"Home Assistant"``).
+
+        Returns:
+            The raw ``sgnl://linkdevice?...`` URI string.
+
+        Raises:
+            SignalApiResponseError: If the URI field is missing from the
+                response.
+        """
+        result = await self._request(
+            "GET",
+            "/v1/qrcodelink/raw",
+            params={"device_name": device_name},
+        )
+
+        uri: Any = None
+        if isinstance(result, dict):
+            # Be tolerant of alternate casings the API may use.
+            for key in ("DeviceLinkUri", "deviceLinkUri", "device_link_uri", "uri"):
+                value = result.get(key)
+                if isinstance(value, str) and value:
+                    uri = value
+                    break
+
+        if not isinstance(uri, str) or not uri:
+            raise SignalApiResponseError(
+                200,
+                f"No device-link URI found in /v1/qrcodelink/raw response: {result!r}",
+            )
+
+        return uri
+
     async def async_send_message(
         self,
         number: str,
