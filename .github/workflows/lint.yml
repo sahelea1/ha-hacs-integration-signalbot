@@ -1,0 +1,22 @@
+name: Lint
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  lint:
+    name: Python lint and compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Run ruff
+        run: ruff check custom_components
+        continue-on-error: true
+      - name: Compile check
+        run: python -m compileall custom_components

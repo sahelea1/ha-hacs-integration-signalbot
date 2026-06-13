@@ -1,0 +1,93 @@
+"""Constants for the Signalbot integration."""
+from __future__ import annotations
+
+from homeassistant.const import Platform
+
+DOMAIN = "signalbot"
+DEFAULT_NAME = "Signalbot"
+MANUFACTURER = "Signal"  # used as device manufacturer
+
+PLATFORMS: list[Platform] = [Platform.NOTIFY, Platform.SENSOR]
+
+# Config entry data keys
+CONF_API_URL = "api_url"
+CONF_NUMBER = "number"        # the linked/registered Signal sender account (E.164)
+CONF_DEVICE_NAME = "device_name"
+
+# Options keys
+CONF_RECIPIENTS = "recipients"
+CONF_RECEIVE_ENABLED = "receive_enabled"
+CONF_POLL_INTERVAL = "poll_interval"
+
+# Recipient dict keys
+CONF_ID = "id"
+CONF_RECIPIENT_NAME = "name"
+CONF_PHONE = "phone_number"
+CONF_USERNAME = "username"
+CONF_PREFER = "prefer"        # "phone" | "username"
+
+PREFER_PHONE = "phone"
+PREFER_USERNAME = "username"
+
+# Defaults
+DEFAULT_API_URL = "http://localhost:8080"
+DEFAULT_DEVICE_NAME = "Home Assistant"
+DEFAULT_POLL_INTERVAL = 5
+MIN_POLL_INTERVAL = 2
+
+EVENT_MESSAGE_RECEIVED = "signalbot_message_received"
+
+# Service
+SERVICE_SEND_MESSAGE = "send_message"
+ATTR_MESSAGE = "message"
+ATTR_RECIPIENTS = "recipients"
+ATTR_ATTACHMENTS = "attachments"
+
+# NOTE: The exact username address format expected by signal-cli-rest-api has not
+# been verified against the API source or documentation (no .dev/research.md found).
+# signal-cli-rest-api may expect usernames in the form "username.discriminator",
+# as a bare string, or with a prefix such as "u:username". Verify against
+# https://github.com/bbernhard/signal-cli-rest-api and update _format_username()
+# and USERNAME_ADDRESS_PREFIX below if needed.
+USERNAME_ADDRESS_PREFIX: str = ""  # Set to e.g. "u:" if the API requires a prefix.
+
+
+def _format_username(username: str) -> str:
+    """Return the username in the address format expected by signal-cli-rest-api.
+
+    Adjust USERNAME_ADDRESS_PREFIX or the logic here once the exact format is
+    confirmed against the signal-cli-rest-api documentation/source.
+    """
+    username = username.strip()
+    if not username:
+        return username
+    if USERNAME_ADDRESS_PREFIX and not username.startswith(USERNAME_ADDRESS_PREFIX):
+        return f"{USERNAME_ADDRESS_PREFIX}{username}"
+    return username
+
+
+def format_recipient(recipient: dict) -> str | None:
+    """Return the signal-cli-rest-api address string for a recipient dict.
+
+    A recipient may have a phone number and/or a username; ``prefer`` selects which
+    to use, falling back to whichever is present.  Returns ``None`` if neither is
+    set.  Phone numbers are returned as-is (E.164).  Usernames are returned through
+    ``_format_username()`` so the exact wire format can be adjusted in one place.
+    """
+    prefer: str = recipient.get(CONF_PREFER, PREFER_PHONE)
+    phone: str = (recipient.get(CONF_PHONE) or "").strip()
+    username: str = (recipient.get(CONF_USERNAME) or "").strip()
+
+    if prefer == PREFER_USERNAME:
+        if username:
+            return _format_username(username)
+        if phone:
+            return phone
+    else:
+        # Default: prefer phone
+        if phone:
+            return phone
+        if username:
+            return _format_username(username)
+
+    return None

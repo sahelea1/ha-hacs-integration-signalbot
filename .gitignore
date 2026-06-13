@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.egg
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Virtual environments
+.dev/
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Distribution / packaging
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
