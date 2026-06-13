@@ -1,0 +1,167 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to signal-cli-rest-api",
+        "description": "Enter the base URL of your signal-cli-rest-api server. Home Assistant will connect to it to send and receive Signal messages.",
+        "data": {
+          "api_url": "API URL",
+          "device_name": "Device name"
+        },
+        "data_description": {
+          "api_url": "For example http://localhost:8080. Do not include a trailing slash.",
+          "device_name": "The name shown on your phone under Linked Devices when linking Home Assistant."
+        }
+      },
+      "menu": {
+        "title": "Choose a Signal account",
+        "description": "How would you like to provide the Signal account Home Assistant should send from?",
+        "menu_options": {
+          "link": "Link an existing Signal account (scan a QR code) — recommended",
+          "register": "Register a NEW phone number with Signal",
+          "existing": "Use a number already registered on this server"
+        }
+      },
+      "link": {
+        "title": "Link Home Assistant to Signal",
+        "description": "On your phone, open Signal and go to Settings → Linked Devices → Link New Device, then scan the QR code below. After scanning, click Submit and wait while Home Assistant detects the linked account."
+      },
+      "link_retry": {
+        "title": "Linking timed out",
+        "description": "Home Assistant did not detect a newly linked account in time. Make sure you scanned the QR code in the Signal app, then click Submit to generate a fresh QR code and try again."
+      },
+      "register": {
+        "title": "Register a new number",
+        "description": "Enter the phone number to register with Signal. Signal will send a verification code. If Signal asks for a captcha, paste the token here.",
+        "data": {
+          "number": "Phone number (E.164)",
+          "captcha": "Captcha token (optional)",
+          "use_voice": "Receive the code by phone call instead of SMS"
+        },
+        "data_description": {
+          "number": "International format including the leading +, e.g. +15551234567."
+        }
+      },
+      "verify": {
+        "title": "Verify {number}",
+        "description": "Enter the verification code Signal sent to {number}. If this account has a registration lock PIN, enter it as well.",
+        "data": {
+          "token": "Verification code",
+          "pin": "Registration lock PIN (optional)"
+        }
+      },
+      "existing": {
+        "title": "Select an account",
+        "description": "Choose the Signal number already registered on this server that Home Assistant should send from.",
+        "data": {
+          "number": "Signal account"
+        }
+      }
+    },
+    "progress": {
+      "linking": "Waiting for you to scan the QR code in the Signal app. This dialog will continue automatically once the account is linked."
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the signal-cli-rest-api server. Check the URL and that the server is running.",
+      "invalid_captcha": "Registration was rejected. Signal may require a valid captcha token. Obtain a fresh token and try again.",
+      "verification_failed": "Verification failed. Check the code (and PIN, if set) and try again.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This Signal account is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Signalbot options",
+        "description": "Manage your recipients and receive settings.",
+        "menu_options": {
+          "add_recipient": "Add a recipient",
+          "edit_recipient": "Edit a recipient",
+          "remove_recipient": "Remove recipients",
+          "settings": "Receive settings"
+        }
+      },
+      "add_recipient": {
+        "title": "Add a recipient",
+        "description": "Add a contact or chat partner. Provide a phone number, a username, or both.",
+        "data": {
+          "name": "Display name",
+          "phone_number": "Phone number (E.164)",
+          "username": "Signal username",
+          "prefer": "Prefer"
+        },
+        "data_description": {
+          "prefer": "Which address to use when both a phone number and username are set."
+        }
+      },
+      "edit_recipient": {
+        "title": "Edit a recipient",
+        "description": "Choose which recipient to edit.",
+        "data": {
+          "id": "Recipient"
+        }
+      },
+      "edit_recipient_form": {
+        "title": "Edit {name}",
+        "description": "Update this recipient. Provide a phone number, a username, or both.",
+        "data": {
+          "name": "Display name",
+          "phone_number": "Phone number (E.164)",
+          "username": "Signal username",
+          "prefer": "Prefer"
+        },
+        "data_description": {
+          "prefer": "Which address to use when both a phone number and username are set."
+        }
+      },
+      "remove_recipient": {
+        "title": "Remove recipients",
+        "description": "Select the recipients you want to remove.",
+        "data": {
+          "id": "Recipients to remove"
+        }
+      },
+      "settings": {
+        "title": "Receive settings",
+        "description": "Configure whether Home Assistant polls for incoming Signal messages and how often.",
+        "data": {
+          "receive_enabled": "Receive incoming messages",
+          "poll_interval": "Poll interval (seconds)"
+        }
+      }
+    },
+    "error": {
+      "recipient_needs_address": "Provide at least a phone number or a username."
+    }
+  },
+  "selector": {
+    "prefer": {
+      "options": {
+        "phone": "Phone number",
+        "username": "Username"
+      }
+    }
+  },
+  "services": {
+    "send_message": {
+      "name": "Send message",
+      "description": "Sends a Signal message to one or more recipients.",
+      "fields": {
+        "message": {
+          "name": "Message",
+          "description": "The text body of the message to send."
+        },
+        "recipients": {
+          "name": "Recipients",
+          "description": "A list of recipients. Each may be a configured recipient name, an E.164 phone number, a username (u:name.1234), or a group id."
+        },
+        "attachments": {
+          "name": "Attachments",
+          "description": "An optional list of base64-encoded file contents to attach to the message."
+        }
+      }
+    }
+  }
+}
