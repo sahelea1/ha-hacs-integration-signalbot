@@ -350,3 +350,80 @@ class SignalApiClient:
         except SignalApiError:
             return False
         return True
+
+
+# ---------------------------------------------------------------------------
+# Manager client (companion add-on)
+# ---------------------------------------------------------------------------
+
+_MANAGER_TIMEOUT = aiohttp.ClientTimeout(total=10)
+
+
+class SignalManagerClient:
+    """Async client for the Signalbot companion add-on manager API.
+
+    The manager exposes a small JSON config endpoint that the integration reads
+    at runtime to discover the linked number, the bundled signal-cli-rest-api
+    base URL, the configured recipients, and polling preferences.
+    """
+
+    def __init__(self, session: aiohttp.ClientSession, manager_url: str) -> None:
+        """Initialise the manager client.
+
+        Args:
+            session: An existing :class:`aiohttp.ClientSession` to use for all
+                requests.  The caller is responsible for its lifecycle.
+            manager_url: Root URL of the add-on manager, e.g.
+                ``"http://local-signalbot:8099"``.  Trailing slashes are
+                stripped.
+        """
+        self._session = session
+        self._manager_url = manager_url.rstrip("/")
+
+    @property
+    def manager_url(self) -> str:
+        """Return the normalised manager base URL."""
+        return self._manager_url
+
+    async def async_get_config(self) -> dict[str, Any]:
+        """Return the add-on configuration.
+
+        Endpoint: ``GET {manager_url}/api/config``
+
+        Returns:
+            The decoded JSON config dict.
+
+        Raises:
+            SignalApiConnectionError: On network-level failures.
+            SignalApiResponseError: On HTTP 4xx / 5xx responses or a non-dict
+                body.
+        """
+        url = f"{self._manager_url}/api/config"
+
+        try:
+            async with self._session.request(
+                "GET",
+                url,
+                timeout=_MANAGER_TIMEOUT,
+            ) as response:
+                if response.status < 200 or response.status >= 300:
+                    try:
+                        body = await response.text()
+                    except Exception:  # noqa: BLE001
+                        body = ""
+                    raise SignalApiResponseError(response.status, body)
+
+                result = await response.json(content_type=None)
+        except SignalApiError:
+            raise
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            raise SignalApiConnectionError(
+                f"Cannot connect to Signalbot add-on manager at {url}: {err}"
+            ) from err
+
+        if not isinstance(result, dict):
+            raise SignalApiResponseError(
+                200, f"Manager /api/config returned a non-object body: {result!r}"
+            )
+
+        return result

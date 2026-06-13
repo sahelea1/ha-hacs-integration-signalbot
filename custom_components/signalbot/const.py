@@ -10,13 +10,12 @@ MANUFACTURER = "Signal"  # used as device manufacturer
 PLATFORMS: list[Platform] = [Platform.NOTIFY, Platform.SENSOR]
 
 # Config entry data keys
-CONF_API_URL = "api_url"
-CONF_NUMBER = "number"        # the linked/registered Signal sender account (E.164)
-CONF_DEVICE_NAME = "device_name"
+# The integration now stores only the companion add-on manager URL in
+# ``entry.data``. Everything else (number, api_url, recipients, …) is fetched
+# at runtime from the add-on's manager API (GET {manager_url}/api/config).
+CONF_MANAGER_URL = "manager_url"
 
-# Options keys
-CONF_RECIPIENTS = "recipients"
-CONF_RECEIVE_ENABLED = "receive_enabled"
+# Add-on / runtime config keys (these come from the manager API, not entry.options).
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_KNOWN_SENDERS_ONLY = "known_senders_only"
 
@@ -31,11 +30,10 @@ PREFER_PHONE = "phone"
 PREFER_USERNAME = "username"
 
 # Defaults
-DEFAULT_API_URL = "http://localhost:8080"
-DEFAULT_DEVICE_NAME = "Home Assistant"
 DEFAULT_POLL_INTERVAL = 5
 MIN_POLL_INTERVAL = 2
 DEFAULT_KNOWN_SENDERS_ONLY = True
+DEFAULT_SIGNAL_API_PORT = 8080
 
 EVENT_MESSAGE_RECEIVED = "signalbot_message_received"
 
@@ -93,7 +91,9 @@ def format_recipient(recipient: dict) -> str | None:
     return None
 
 
-def match_recipient(recipients: list[dict], source: str | None, source_uuid: str | None = None) -> dict | None:
+def match_recipient(
+    recipients: list[dict], source: str | None, source_uuid: str | None = None
+) -> dict | None:
     """Return the configured recipient that matches an incoming message sender, else None.
 
     Matching is by phone number (E.164) against each recipient's CONF_PHONE, comparing

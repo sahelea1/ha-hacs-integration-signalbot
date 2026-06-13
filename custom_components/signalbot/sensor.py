@@ -13,8 +13,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
-    CONF_DEVICE_NAME,
-    CONF_RECIPIENTS,
     DEFAULT_NAME,
     DOMAIN,
     MANUFACTURER,
@@ -50,15 +48,16 @@ class _SignalbotBaseSensor(CoordinatorEntity[SignalbotCoordinator], SensorEntity
         """Initialise the sensor."""
         super().__init__(coordinator)
         self._entry = entry
+        device_name = (coordinator.data or {}).get("device_name") or DEFAULT_NAME
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.data.get(CONF_DEVICE_NAME) or DEFAULT_NAME,
+            name=device_name,
             manufacturer=MANUFACTURER,
         )
 
 
 class SignalbotStatusSensor(_SignalbotBaseSensor):
-    """Sensor reporting the connection status of the Signal API."""
+    """Sensor reporting the connection status of the Signal account."""
 
     _attr_icon = "mdi:message-text"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -72,7 +71,12 @@ class SignalbotStatusSensor(_SignalbotBaseSensor):
     @property
     def native_value(self) -> str:
         """Return the connection state."""
-        return "connected" if self.coordinator.healthy else "disconnected"
+        if not self.coordinator.last_update_success:
+            return "disconnected"
+        data = self.coordinator.data or {}
+        if data.get("linked"):
+            return "connected"
+        return "waiting_for_link"
 
     @property
     def available(self) -> bool:
@@ -82,12 +86,14 @@ class SignalbotStatusSensor(_SignalbotBaseSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return diagnostic attributes."""
-        recipients = self._entry.options.get(CONF_RECIPIENTS, [])
+        data = self.coordinator.data or {}
+        recipients = data.get("recipients", [])
         return {
-            "number": self.coordinator.number,
-            "mode": self.coordinator.mode,
-            "version": self.coordinator.version,
+            "number": data.get("number"),
+            "mode": data.get("mode"),
+            "version": data.get("version"),
             "recipient_count": len(recipients),
+            "known_senders_only": data.get("known_senders_only"),
         }
 
 
@@ -123,6 +129,6 @@ class SignalbotLastMessageSensor(_SignalbotBaseSensor):
             "source": message.get("source"),
             "source_name": message.get("source_name"),
             "timestamp": message.get("timestamp"),
-            "group_id": message.get("group_id"),
+            "recipient_name": message.get("recipient_name"),
             "full_message": message.get("message"),
         }

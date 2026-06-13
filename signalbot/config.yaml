@@ -1,0 +1,30 @@
+---
+name: Signalbot
+version: "1.0.0"
+slug: signalbot
+description: >-
+  Self-contained Signal bridge for Home Assistant: bundles signal-cli-rest-api
+  and a setup UI for QR device-linking and chat-partner management.
+url: "https://github.com/sahelea1/ha-hacs-integration-signalbot"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+init: false
+startup: application
+boot: auto
+ingress: true
+ingress_port: 8099
+panel_icon: "mdi:message-processing"
+panel_title: Signalbot
+hassio_api: true
+homeassistant_api: false
+map:
+  - type: data
+    read_only: false
+discovery:
+  - signalbot
+options:
+  log_level: info
+schema:
+  log_level: "list(trace|debug|info|notice|warning|error|fatal)"

@@ -1,151 +1,28 @@
 {
   "config": {
+    "flow_title": "Signalbot",
     "step": {
+      "hassio_confirm": {
+        "title": "Signalbot",
+        "description": "Das Signalbot-Add-on wurde gefunden. Bestätige die Einrichtung der Signalbot-Integration. Das Verknüpfen von Signal-Konten und die Verwaltung der Empfänger erfolgt über die Add-on-Oberfläche."
+      },
       "user": {
-        "title": "Mit signal-cli-rest-api verbinden",
-        "description": "Gib die Basis-URL deines signal-cli-rest-api-Servers ein. Home Assistant verbindet sich damit, um Signal-Nachrichten zu senden und zu empfangen.",
+        "title": "Signalbot",
+        "description": "Gib die URL des Signalbot-Add-on-Managers ein. Den Manager findest du in der Add-on-Seitenleiste.",
         "data": {
-          "api_url": "API-URL",
-          "device_name": "Gerätename"
+          "manager_url": "Manager-URL"
         },
         "data_description": {
-          "api_url": "Zum Beispiel http://localhost:8080. Ohne abschließenden Schrägstrich.",
-          "device_name": "Der Name, der auf deinem Telefon unter „Verknüpfte Geräte“ angezeigt wird, wenn Home Assistant verknüpft wird."
-        }
-      },
-      "menu": {
-        "title": "Signal-Konto auswählen",
-        "description": "Wie soll das Signal-Konto bereitgestellt werden, von dem Home Assistant senden soll?",
-        "menu_options": {
-          "link": "Ein vorhandenes Signal-Konto verknüpfen (QR-Code scannen) — empfohlen",
-          "register": "Eine NEUE Telefonnummer bei Signal registrieren",
-          "existing": "Eine bereits auf diesem Server registrierte Nummer verwenden"
-        }
-      },
-      "link": {
-        "title": "Home Assistant mit Signal verknüpfen",
-        "description": "Öffne auf deinem Telefon Signal und gehe zu Einstellungen → Verknüpfte Geräte → Neues Gerät verknüpfen, und scanne dann den unten stehenden QR-Code. Klicke nach dem Scannen auf „Absenden“ und warte, während Home Assistant das verknüpfte Konto erkennt."
-      },
-      "link_retry": {
-        "title": "Zeitüberschreitung beim Verknüpfen",
-        "description": "Home Assistant hat rechtzeitig kein neu verknüpftes Konto erkannt. Stelle sicher, dass du den QR-Code in der Signal-App gescannt hast, und klicke dann auf „Absenden“, um einen neuen QR-Code zu erzeugen und es erneut zu versuchen."
-      },
-      "register": {
-        "title": "Neue Nummer registrieren",
-        "description": "Gib die Telefonnummer ein, die bei Signal registriert werden soll. Signal sendet einen Bestätigungscode. Falls Signal nach einem Captcha fragt, füge den Token hier ein.",
-        "data": {
-          "number": "Telefonnummer (E.164)",
-          "captcha": "Captcha-Token (optional)",
-          "use_voice": "Code per Anruf statt per SMS erhalten"
-        },
-        "data_description": {
-          "number": "Internationales Format einschließlich des führenden +, z. B. +15551234567."
-        }
-      },
-      "verify": {
-        "title": "{number} verifizieren",
-        "description": "Gib den Bestätigungscode ein, den Signal an {number} gesendet hat. Falls für dieses Konto eine Registrierungssperren-PIN gesetzt ist, gib diese ebenfalls ein.",
-        "data": {
-          "token": "Bestätigungscode",
-          "pin": "Registrierungssperren-PIN (optional)"
-        }
-      },
-      "existing": {
-        "title": "Konto auswählen",
-        "description": "Wähle die bereits auf diesem Server registrierte Signal-Nummer aus, von der Home Assistant senden soll.",
-        "data": {
-          "number": "Signal-Konto"
+          "manager_url": "URL des Signalbot-Add-on-Managers, zum Beispiel http://local-signalbot:8099."
         }
       }
     },
-    "progress": {
-      "linking": "Warte darauf, dass du den QR-Code in der Signal-App scannst. Dieser Dialog wird automatisch fortgesetzt, sobald das Konto verknüpft ist."
-    },
     "error": {
-      "cannot_connect": "Verbindung zum signal-cli-rest-api-Server fehlgeschlagen. Überprüfe die URL und ob der Server läuft.",
-      "invalid_captcha": "Die Registrierung wurde abgelehnt. Signal benötigt möglicherweise einen gültigen Captcha-Token. Hole einen neuen Token und versuche es erneut.",
-      "verification_failed": "Verifizierung fehlgeschlagen. Überprüfe den Code (und die PIN, falls gesetzt) und versuche es erneut.",
-      "unknown": "Ein unerwarteter Fehler ist aufgetreten."
+      "cannot_connect": "Verbindung zum Signalbot-Add-on-Manager fehlgeschlagen. Überprüfe die URL und stelle sicher, dass das Add-on läuft."
     },
     "abort": {
-      "already_configured": "Dieses Signal-Konto ist bereits eingerichtet."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Signalbot-Optionen",
-        "description": "Verwalte deine Empfänger und Empfangseinstellungen.",
-        "menu_options": {
-          "add_recipient": "Empfänger hinzufügen",
-          "edit_recipient": "Empfänger bearbeiten",
-          "remove_recipient": "Empfänger entfernen",
-          "settings": "Empfangseinstellungen"
-        }
-      },
-      "add_recipient": {
-        "title": "Empfänger hinzufügen",
-        "description": "Füge einen Kontakt oder Chatpartner hinzu. Gib eine Telefonnummer, einen Benutzernamen oder beides an.",
-        "data": {
-          "name": "Anzeigename",
-          "phone_number": "Telefonnummer (E.164)",
-          "username": "Signal-Benutzername",
-          "prefer": "Bevorzugen"
-        },
-        "data_description": {
-          "prefer": "Welche Adresse verwendet werden soll, wenn sowohl eine Telefonnummer als auch ein Benutzername gesetzt sind."
-        }
-      },
-      "edit_recipient": {
-        "title": "Empfänger bearbeiten",
-        "description": "Wähle aus, welcher Empfänger bearbeitet werden soll.",
-        "data": {
-          "id": "Empfänger"
-        }
-      },
-      "edit_recipient_form": {
-        "title": "{name} bearbeiten",
-        "description": "Aktualisiere diesen Empfänger. Gib eine Telefonnummer, einen Benutzernamen oder beides an.",
-        "data": {
-          "name": "Anzeigename",
-          "phone_number": "Telefonnummer (E.164)",
-          "username": "Signal-Benutzername",
-          "prefer": "Bevorzugen"
-        },
-        "data_description": {
-          "prefer": "Welche Adresse verwendet werden soll, wenn sowohl eine Telefonnummer als auch ein Benutzername gesetzt sind."
-        }
-      },
-      "remove_recipient": {
-        "title": "Empfänger entfernen",
-        "description": "Wähle die Empfänger aus, die du entfernen möchtest.",
-        "data": {
-          "id": "Zu entfernende Empfänger"
-        }
-      },
-      "settings": {
-        "title": "Empfangseinstellungen",
-        "description": "Konfiguriere, ob Home Assistant eingehende Signal-Nachrichten abruft und wie oft.",
-        "data": {
-          "receive_enabled": "Eingehende Nachrichten empfangen",
-          "poll_interval": "Abrufintervall (Sekunden)",
-          "known_senders_only": "Nur auf bekannte Absender reagieren"
-        },
-        "data_description": {
-          "known_senders_only": "Wenn aktiviert, werden eingehende Nachrichten von Absendern, die nicht als Empfänger konfiguriert sind, ignoriert."
-        }
-      }
-    },
-    "error": {
-      "recipient_needs_address": "Gib mindestens eine Telefonnummer oder einen Benutzernamen an."
-    }
-  },
-  "selector": {
-    "prefer": {
-      "options": {
-        "phone": "Telefonnummer",
-        "username": "Benutzername"
-      }
+      "already_configured": "Signalbot ist bereits eingerichtet.",
+      "single_instance_allowed": "Es ist nur eine einzelne Instanz von Signalbot zulässig."
     }
   },
   "services": {

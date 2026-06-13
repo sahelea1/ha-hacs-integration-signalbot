@@ -1,14 +1,25 @@
 ## Signalbot
 
-Signalbot integrates Home Assistant with [Signal](https://signal.org) via the [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) HTTP service, letting you send and receive Signal messages directly from your automations and scripts.
+Signalbot connects Home Assistant to [Signal](https://signal.org) using two components that work together: a **Home Assistant Add-on** (bundles `signal-cli-rest-api` + a setup Web UI) and a **HACS custom integration** (creates entities and events in HA).
 
-### Features
+### How it works
 
-- **UI config flow** — link Home Assistant to a Signal account by scanning a QR code with the Signal app, or register/use an existing number
-- **Chat partners / recipients** — manage recipients by friendly name, phone number (E.164), and/or @username through the integration's *Configure* dialog
-- **Per-recipient notify entities** — each recipient becomes a `notify.signalbot_<name>` entity usable in automations
-- **`signalbot.send_message` service** — send messages with optional file attachments to one or more recipients
-- **Receive messages** — fires a `signalbot_message_received` event and exposes a `sensor.signalbot_last_message` sensor
-- **Link-status sensor** — monitor whether the Signal account connection is healthy
+1. Install the **Signalbot Add-on** from this repository and start it.
+2. Open the add-on **Web UI** — scan the auto-refreshing **QR code** with the Signal app (**Settings → Linked devices → Link new device**) to link HA as a Signal linked device.
+3. Add **chat partners** in the Web UI (friendly name + phone number and/or @username).
+4. The add-on auto-announces itself via Supervisor discovery — confirm the integration in **Settings → Devices & Services**.
 
-> **Prerequisite:** A running [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) instance (local or remote) is required. See the [README](https://github.com/sahelea1/ha-hacs-integration-signalbot) for setup instructions.
+### What you get
+
+- **`notify.signalbot_<name>`** entity per chat partner — send Signal messages from automations.
+- **`signalbot.send_message`** service — send to multiple recipients with optional file attachments.
+- **`signalbot_message_received`** event — fire automations when a message arrives. Includes `recipient_name`, `source`, `message`, and `timestamp`. Only known senders (configured chat partners) trigger the event — configurable in the add-on UI.
+- **`sensor.signalbot_last_message`** — the most recently received message text.
+- **`sensor.signalbot_link_status`** — reports `linked`, `unlinked`, or `error`.
+
+### Requirements
+
+- **Home Assistant OS** or **Home Assistant Supervised** (add-ons require Supervisor).
+- Signalbot HACS integration installed before or alongside the add-on.
+
+> All configuration (chat partners, known-senders allowlist, poll interval) is managed in the **add-on Web UI** — no YAML required.
