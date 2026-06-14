@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none" role="img" aria-label="Signalbot">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3D8BFF"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="house" x1="168" y1="150" x2="344" y2="308" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3D8BFF"/>
+      <stop offset="1" stop-color="#2F6BDF"/>
+    </linearGradient>
+    <filter id="softshadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#0B2A66" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <!-- App badge -->
+  <rect x="0" y="0" width="512" height="512" rx="116" fill="url(#bg)"/>
+  <!-- subtle top sheen -->
+  <rect x="0" y="0" width="512" height="256" rx="116" fill="#FFFFFF" opacity="0.06"/>
+
+  <!-- Signal-style speech bubble with bottom-left tail -->
+  <g filter="url(#softshadow)">
+    <rect x="96" y="104" width="320" height="240" rx="58" fill="#FFFFFF"/>
+    <path d="M152 296 L152 412 L236 330 Z" fill="#FFFFFF"/>
+  </g>
+
+  <!-- Home Assistant style house inside the bubble -->
+  <g fill="url(#house)">
+    <path d="M256 150 L346 236 H166 Z"/>
+    <rect x="192" y="228" width="128" height="82" rx="14"/>
+  </g>
+  <!-- door (reads as a cutout against the white bubble) -->
+  <rect x="240" y="260" width="32" height="50" rx="9" fill="#FFFFFF"/>
+</svg>

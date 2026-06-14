@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0
+
+- **Whitelist senders by clicking** — the add-on Web UI now lists recent incoming messages/senders; tap "Add as chat partner" to whitelist someone with their exact number, which auto-creates their notify entity and enables message triggers (no more typing E.164 numbers by hand or guessing why a sender was ignored).
+- **Centralized message receiving** — the add-on is now the single receiver of incoming Signal messages and buffers them for both the UI and the integration, eliminating the previous double-drain of signal-cli's receive queue.
+
 ## 1.1.0
 
 - **`native` mode is now the default** — signal-cli runs as a GraalVM native binary out of the box, delivering much lower CPU and RAM usage. On 32-bit (`armv7`) hardware the add-on automatically falls back to `normal`.

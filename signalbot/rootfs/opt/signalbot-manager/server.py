@@ -13,8 +13,11 @@ dependencies) that:
   * Announces itself to Home Assistant via Supervisor discovery in a background
     thread at startup (best-effort, with retry/backoff).
 
-The manager is intentionally *config/UI/QR only* — it never sends or receives
-Signal messages (the companion integration owns that).
+The manager owns config/UI/QR linking *and* is the single consumer of incoming
+Signal messages: it long-polls signal-cli's receive endpoint in a background
+thread, buffers recent messages in memory, and exposes them to the UI (recent
+senders, for one-click whitelisting) and to the companion integration
+(cursor-based polling). The integration owns sending.
 
 Runtime environment (env vars):
   SIGNAL_API_URL            default http://127.0.0.1:8080 (bundled signal-cli-rest-api)
@@ -25,6 +28,7 @@ Runtime environment (env vars):
 
 from __future__ import annotations
 
+import collections
 import json
 import os
 import threading
@@ -36,6 +40,7 @@ from typing import Any
 from urllib import error as urlerror
 from urllib import parse as urlparse
 from urllib import request as urlrequest
+from urllib.parse import quote
 
 # --------------------------------------------------------------------------- #
 # Configuration / constants
@@ -86,6 +91,24 @@ _QR_LOCK = threading.Lock()                # guards _qr_cache / _qr_ts
 _QR_REFRESH_LOCK = threading.Lock()        # single-flight (blocking acquire)
 _qr_cache: bytes | None = None
 _qr_ts: float = 0.0
+
+# --- Incoming message buffer (background receiver) ------------------------- #
+# The manager is the SINGLE consumer of incoming Signal messages: it long-polls
+# /v1/receive in a background thread, buffers text messages in memory, and
+# exposes them to the UI (recent senders) and to the companion integration
+# (cursor-based polling). All access is guarded by _MSG_LOCK.
+_MSG_LOCK = threading.Lock()
+# Bounded ring buffer of recent text messages (oldest evicted first).
+_messages: "collections.deque[dict[str, Any]]" = collections.deque(maxlen=200)
+# Monotonically increasing message id. Seeded from wall-clock millis so ids keep
+# increasing across manager restarts (the integration polls with a cursor).
+_msg_next_id: int = int(time.time() * 1000)
+# How many distinct recent senders the UI surfaces.
+RECENT_SENDERS_LIMIT: int = 25
+# How long /v1/receive long-polls upstream, in seconds.
+RECEIVE_POLL_TIMEOUT: int = 8
+# HTTP timeout for the long-poll request (must exceed RECEIVE_POLL_TIMEOUT).
+RECEIVE_HTTP_TIMEOUT: float = 20.0
 
 
 def log(message: str) -> None:
@@ -342,6 +365,170 @@ def cached_qrcode(device_name: str) -> bytes | None:
 
 
 # --------------------------------------------------------------------------- #
+# Incoming message receiver (background thread)
+# --------------------------------------------------------------------------- #
+
+def _parse_command(text: str) -> tuple[str | None, str | None]:
+    """Derive (command, command_args) from a message body.
+
+    A message whose stripped text starts with ``/`` is treated as a command:
+    the command is the first whitespace-delimited token (lowercased, including
+    the leading slash) and command_args is the remainder (stripped, possibly
+    empty). Otherwise both are ``None``.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("/"):
+        return None, None
+    parts = stripped.split(None, 1)
+    command = parts[0].lower()
+    command_args = parts[1].strip() if len(parts) > 1 else ""
+    return command, command_args
+
+
+def _receive_once(number: str) -> list[Any]:
+    """Long-poll signal-cli once for incoming messages; return the JSON array.
+
+    Returns ``[]`` on any error, empty body, or non-list payload. The upstream
+    call is serialized via ``_SIGNAL_CLI_LOCK`` so it never overlaps a
+    status/QR signal-cli invocation (which would queue on the account
+    config-file lock and spiral latency).
+    """
+    qnum = quote(number, safe="")
+    url = (
+        f"{SIGNAL_API_URL}/v1/receive/{qnum}"
+        f"?timeout={RECEIVE_POLL_TIMEOUT}&ignore_stories=true"
+    )
+    try:
+        req = urlrequest.Request(url, method="GET")
+        with _SIGNAL_CLI_LOCK:
+            with urlrequest.urlopen(req, timeout=RECEIVE_HTTP_TIMEOUT) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+    except (urlerror.URLError, OSError, ValueError) as exc:
+        log(f"receive failed: {exc!r}")
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _ingest(envelopes: list[Any]) -> None:
+    """Buffer text messages from a /v1/receive payload.
+
+    Each item is expected to be ``{"envelope": {...}}``. We only keep items
+    that carry a text body via ``dataMessage.message``; receipts, typing
+    indicators, sync messages without text, etc. are skipped.
+    """
+    global _msg_next_id
+    for item in envelopes:
+        if not isinstance(item, dict):
+            continue
+        envelope = item.get("envelope")
+        if not isinstance(envelope, dict):
+            continue
+
+        text: str | None = None
+        data_message = envelope.get("dataMessage")
+        if isinstance(data_message, dict):
+            msg = data_message.get("message")
+            if isinstance(msg, str) and msg.strip():
+                text = msg
+        if text is None:
+            continue
+
+        source = envelope.get("source") or envelope.get("sourceNumber")
+        source_uuid = envelope.get("sourceUuid")
+        source_name = envelope.get("sourceName")
+        timestamp = envelope.get("timestamp")
+        command, command_args = _parse_command(text)
+
+        with _MSG_LOCK:
+            entry = {
+                "id": _msg_next_id,
+                "source": source,
+                "source_uuid": source_uuid,
+                "source_name": source_name,
+                "message": text,
+                "timestamp": timestamp,
+                "command": command,
+                "command_args": command_args,
+            }
+            _messages.append(entry)
+            _msg_next_id += 1
+
+
+def receiver_worker() -> None:
+    """Continuously long-poll signal-cli for incoming messages.
+
+    When linked, calls ``_receive_once`` back-to-back (the long-poll itself
+    paces the loop). When not linked, sleeps briefly without holding any
+    signal-cli lock so QR/linking remains responsive. Exceptions are caught so
+    the daemon thread never dies.
+    """
+    while True:
+        try:
+            status = cached_status()
+            number = status.get("number")
+            if status.get("linked") and number:
+                envelopes = _receive_once(str(number))
+                if envelopes:
+                    _ingest(envelopes)
+            else:
+                time.sleep(5)
+        except Exception as exc:  # noqa: BLE001 - keep the receiver alive
+            log(f"receiver loop error: {exc!r}")
+            time.sleep(5)
+
+
+def _recent_senders() -> list[dict[str, Any]]:
+    """Compute distinct recent senders (most-recent-first) from the buffer.
+
+    Deduplicates by ``source`` keeping the latest message, annotates each with
+    whether a configured recipient already covers that number, and truncates
+    the snippet. Reads only in-memory state + config (no signal-cli calls).
+    """
+    with _MSG_LOCK:
+        snapshot = list(_messages)
+    with _CONFIG_LOCK:
+        known_numbers = {
+            str(r.get("phone_number", "")).strip()
+            for r in load_config()["recipients"]
+            if str(r.get("phone_number", "")).strip()
+        }
+
+    seen: dict[str, dict[str, Any]] = {}
+    # Iterate newest-first so the first occurrence of a source is the latest.
+    for entry in reversed(snapshot):
+        source = entry.get("source")
+        key = str(source) if source is not None else ""
+        if key in seen:
+            continue
+        snippet = entry.get("message") or ""
+        if len(snippet) > 120:
+            snippet = snippet[:120]
+        seen[key] = {
+            "source": source,
+            "source_uuid": entry.get("source_uuid"),
+            "source_name": entry.get("source_name"),
+            "last_message": snippet,
+            "timestamp": entry.get("timestamp"),
+            "known": (str(source).strip() in known_numbers) if source else False,
+        }
+        if len(seen) >= RECENT_SENDERS_LIMIT:
+            break
+    return list(seen.values())
+
+
+def _messages_since(since: int | None) -> dict[str, Any]:
+    """Return buffered messages with id > since (ascending) plus the last id."""
+    with _MSG_LOCK:
+        snapshot = list(_messages)
+        base = _msg_next_id - 1
+    ordered = sorted(snapshot, key=lambda m: m["id"])
+    if since is not None:
+        ordered = [m for m in ordered if m["id"] > since]
+    last_id = max((m["id"] for m in snapshot), default=base)
+    return {"messages": ordered, "last_id": last_id}
+
+
+# --------------------------------------------------------------------------- #
 # Supervisor discovery (background thread)
 # --------------------------------------------------------------------------- #
 
@@ -586,6 +773,23 @@ class Handler(BaseHTTPRequestHandler):
         # ----- /api/config (for the integration) --------------------- #
         if path == "/api/config" and method == "GET":
             self._send_json(self._build_config_response())
+            return
+
+        # ----- /api/messages (cursor poll for the integration) ------- #
+        if path == "/api/messages" and method == "GET":
+            since_raw = urlparse.parse_qs(urlparse.urlparse(self.path).query).get("since", [None])[0]
+            since: int | None = None
+            if since_raw is not None:
+                try:
+                    since = int(since_raw)
+                except (TypeError, ValueError):
+                    since = None
+            self._send_json(_messages_since(since))
+            return
+
+        # ----- /api/recent-senders (for the UI) ---------------------- #
+        if path == "/api/recent-senders" and method == "GET":
+            self._send_json({"senders": _recent_senders()})
             return
 
         # ----- /api/recipients --------------------------------------- #
@@ -941,6 +1145,13 @@ INDEX_HTML = r"""<!DOCTYPE html>
     </div>
   </section>
 
+  <!-- Recent messages (linked) -->
+  <section id="recentCard" class="card hidden">
+    <h2>Recent messages</h2>
+    <p class="sub">Tap a sender to add them as a chat partner so the bot can react to their messages and you can message them back.</p>
+    <div id="recentList" class="rec-list"></div>
+  </section>
+
   <!-- Chat partners (linked) -->
   <section id="partnersCard" class="card hidden">
     <h2>Chat partners</h2>
@@ -1016,12 +1227,15 @@ INDEX_HTML = r"""<!DOCTYPE html>
 
   var QR_REFRESH_MS = 45000;
   var STATUS_POLL_MS = 7000;
+  var RECENT_POLL_MS = 6000;
 
   var qrTimer = null;
   var wasLinked = null; // null = unknown yet
   var statusInFlight = false; // skip overlapping status polls
   var qrLoadPending = false;   // a QR <img> load is currently in progress
   var qrEverLoaded = false;    // we have successfully shown at least one QR
+  var recentTimer = null;      // recent-senders poll interval handle
+  var recentInFlight = false;  // skip overlapping recent-senders polls
 
   function $(id) { return document.getElementById(id); }
 
@@ -1115,18 +1329,22 @@ INDEX_HTML = r"""<!DOCTYPE html>
 
   function showUnlinked() {
     $("linkCard").classList.remove("hidden");
+    $("recentCard").classList.add("hidden");
     $("partnersCard").classList.add("hidden");
     $("settingsCard").classList.add("hidden");
+    stopRecentRefresh();
     startQrRefresh();
   }
 
   function showLinked() {
     stopQrRefresh();
     $("linkCard").classList.add("hidden");
+    $("recentCard").classList.remove("hidden");
     $("partnersCard").classList.remove("hidden");
     $("settingsCard").classList.remove("hidden");
     loadRecipients();
     loadSettings();
+    startRecentRefresh();
   }
 
   function pollStatus() {
@@ -1284,6 +1502,102 @@ INDEX_HTML = r"""<!DOCTYPE html>
     }).catch(function (e) { errEl.textContent = e.message; });
   }
 
+  // ---- recent messages / senders ------------------------------------ //
+
+  function startRecentRefresh() {
+    loadRecentSenders();
+    if (recentTimer) return;
+    recentTimer = setInterval(loadRecentSenders, RECENT_POLL_MS);
+  }
+  function stopRecentRefresh() {
+    if (recentTimer) { clearInterval(recentTimer); recentTimer = null; }
+  }
+
+  function loadRecentSenders() {
+    if (recentInFlight) return; // in-flight guard: avoid request pile-up
+    recentInFlight = true;
+    api("./api/recent-senders")
+      .then(function (data) { renderRecentSenders(data && data.senders); })
+      .catch(function () { /* transient; keep last render */ })
+      .then(function () { recentInFlight = false; });
+  }
+
+  function renderRecentSenders(list) {
+    var container = $("recentList");
+    container.innerHTML = "";
+    if (!list || !list.length) {
+      var e = document.createElement("div");
+      e.className = "empty";
+      e.textContent = "No messages yet. Send a Signal message to this account and it will show up here.";
+      container.appendChild(e);
+      return;
+    }
+    list.forEach(function (s) {
+      container.appendChild(buildSenderRow(s));
+    });
+  }
+
+  function buildSenderRow(s) {
+    var row = document.createElement("div");
+    row.className = "rec";
+
+    var info = document.createElement("div");
+    info.className = "info";
+
+    var name = document.createElement("div");
+    name.className = "name";
+    name.textContent = s.source_name || s.source || "Unknown sender";
+    info.appendChild(name);
+
+    var badges = document.createElement("div");
+    badges.className = "badges";
+    if (s.source) badges.appendChild(badge(s.source));
+    info.appendChild(badges);
+
+    if (s.last_message) {
+      var snippet = document.createElement("div");
+      snippet.className = "helper";
+      snippet.style.marginTop = "4px";
+      snippet.textContent = s.last_message;
+      info.appendChild(snippet);
+    }
+    row.appendChild(info);
+
+    var actions = document.createElement("div");
+    actions.className = "row-actions";
+    if (s.known) {
+      actions.appendChild(badge("✓ Added"));
+    } else {
+      var addBtn = document.createElement("button");
+      addBtn.className = "small";
+      addBtn.textContent = "Add as chat partner";
+      addBtn.onclick = function () { addSenderAsPartner(s, addBtn); };
+      actions.appendChild(addBtn);
+    }
+    row.appendChild(actions);
+    return row;
+  }
+
+  function addSenderAsPartner(s, btn) {
+    if (btn) { btn.disabled = true; }
+    api("./api/recipients", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: s.source_name || s.source,
+        phone_number: s.source,
+        prefer: "phone"
+      })
+    }).then(function () {
+      toast("Chat partner added", "ok");
+      loadRecentSenders();
+      loadRecipients();
+    }).catch(function (e) {
+      if (btn) { btn.disabled = false; }
+      toast(e.message, "err");
+    });
+  }
+
   // ---- settings ----------------------------------------------------- //
 
   function loadSettings() {
@@ -1350,6 +1664,9 @@ INDEX_HTML = r"""<!DOCTYPE html>
 def main() -> None:
     # Kick off Supervisor discovery in the background (best-effort).
     threading.Thread(target=discovery_worker, name="discovery", daemon=True).start()
+
+    # Continuously consume incoming Signal messages into the in-memory buffer.
+    threading.Thread(target=receiver_worker, name="receiver", daemon=True).start()
 
     server = ThreadingHTTPServer(("0.0.0.0", MANAGER_PORT), Handler)
     server.daemon_threads = True

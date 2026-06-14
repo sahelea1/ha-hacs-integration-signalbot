@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" fill="none" role="img" aria-label="Signalbot — Signal for Home Assistant">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="320" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3D8BFF"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="house" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3D8BFF"/>
+      <stop offset="1" stop-color="#2F6BDF"/>
+    </linearGradient>
+    <filter id="softshadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="9" flood-color="#0B2A66" flood-opacity="0.30"/>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="320" fill="#0E1726"/>
+
+  <!-- Badge -->
+  <g transform="translate(64,64) scale(0.375)">
+    <rect x="0" y="0" width="512" height="512" rx="116" fill="url(#bg)"/>
+    <rect x="0" y="0" width="512" height="256" rx="116" fill="#FFFFFF" opacity="0.06"/>
+    <g filter="url(#softshadow)">
+      <rect x="96" y="104" width="320" height="240" rx="58" fill="#FFFFFF"/>
+      <path d="M152 296 L152 412 L236 330 Z" fill="#FFFFFF"/>
+    </g>
+    <g fill="url(#house)">
+      <path d="M256 150 L346 236 H166 Z"/>
+      <rect x="192" y="228" width="128" height="82" rx="14"/>
+    </g>
+    <rect x="240" y="260" width="32" height="50" rx="9" fill="#FFFFFF"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="320" y="166" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="92" font-weight="700" fill="#FFFFFF" letter-spacing="-1">Signalbot</text>
+  <text x="324" y="222" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="34" font-weight="500" fill="#9DB2D4">Signal messaging for Home Assistant</text>
+</svg>

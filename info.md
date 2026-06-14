@@ -1,4 +1,4 @@
-## Signalbot (add-on v1.1.0 · integration v0.3.0)
+## Signalbot (add-on v1.2.0 · integration v0.4.0)
 
 Signalbot connects Home Assistant to [Signal](https://signal.org) using two components that work together: a **Home Assistant Add-on** (bundles `signal-cli-rest-api` + a setup Web UI) and a **HACS custom integration** (creates entities and events in HA).
 
@@ -6,8 +6,14 @@ Signalbot connects Home Assistant to [Signal](https://signal.org) using two comp
 
 1. Install the **Signalbot Add-on** from this repository and start it.
 2. Open the add-on **Web UI** ("Open Web UI") — scan the **QR code** with the Signal app (**Settings → Linked devices → Link new device**) to link HA as a Signal linked device.
-3. Add **chat partners** in the Web UI (friendly name, phone number in E.164 format, and/or Signal username).
+3. Add **chat partners** in the Web UI — either click **"Add as chat partner"** next to a recent sender in the **Recent messages** card (recommended), or enter a friendly name and E.164 number manually.
 4. The add-on auto-announces itself via Supervisor discovery — confirm the integration under **Settings → Devices & Services** when prompted.
+
+### Adding chat partners the easy way
+
+After someone sends you a Signal message, their number appears in the **Recent messages** card in the Web UI. Click **"Add as chat partner"** to whitelist them instantly. This captures their exact number — eliminating the most common reason senders are silently ignored — and automatically creates their `notify.signalbot_<name>` entity and enables the `signalbot_message_received` event for them.
+
+> By default, incoming messages from senders not in your chat-partner list are silently ignored (known-senders allowlist). The number must exactly match the sender's — clicking to whitelist guarantees this.
 
 ### What you get
 

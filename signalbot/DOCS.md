@@ -1,11 +1,13 @@
-# Signalbot Add-on (v1.1.0)
+# Signalbot Add-on (v1.2.0)
 
 Signalbot bundles two services in a single Home Assistant add-on container:
 
 - **signal-cli-rest-api** — the open-source Signal messenger bridge by [@bbernhard](https://github.com/bbernhard/signal-cli-rest-api), which handles all Signal protocol communication.
-- **Signalbot Manager** — a lightweight Python web app that provides a setup UI for QR device-linking and chat-partner management.
+- **Signalbot Manager** — a lightweight Python web app that provides a setup UI for QR device-linking, recent-message browsing, and chat-partner management.
 
-The companion **Signalbot integration v0.3.0** (installed separately via HACS) is auto-discovered by Home Assistant once this add-on is running, and lets you send and receive Signal messages from automations and scripts.
+The add-on is the **single receiver** of all incoming Signal messages. It buffers them for the Web UI's recent-messages list and delivers them to the integration — there is no separate polling of signal-cli by the integration.
+
+The companion **Signalbot integration v0.4.0** (installed separately via HACS) is auto-discovered by Home Assistant once this add-on is running, and lets you send and receive Signal messages from automations and scripts.
 
 ---
 
@@ -49,7 +51,21 @@ If the QR code expires before you can scan it, refresh the page to get a new one
 
 ## Adding chat partners
 
-After linking your account:
+### Recommended: whitelist from the Recent messages card
+
+After linking, any Signal message sent to your linked account appears in the **Recent messages** card in the Web UI (showing the sender's number, name, and last message). To whitelist a sender:
+
+1. Open the add-on **Web UI**.
+2. Find the sender in the **Recent messages** card.
+3. Click **"Add as chat partner"**.
+
+This captures the sender's **exact number** as stored by Signal. Once saved, the integration automatically creates a `notify.signalbot_<name>` entity for them and begins firing the `signalbot_message_received` event for their messages.
+
+**Why exact-match matters:** the known-senders allowlist (enabled by default) silently ignores messages from any sender whose number is not in your chat-partner list. The match is exact — even a formatting difference drops the message silently. Clicking to whitelist eliminates this risk.
+
+### Manual: enter a number directly
+
+If you want to add someone before they message you:
 
 1. In the Web UI, go to **Chat partners**.
 2. For each contact you want to use from automations, enter:
@@ -58,7 +74,7 @@ After linking your account:
    - If both are provided, use the **prefer** toggle to choose which identifier is used when sending.
 3. Save the list.
 
-> **Note:** Incoming-message matching uses the sender's **phone number**. If a contact sends from a number not in your chat-partner list, their message is silently ignored by default (see Known-senders allowlist below).
+> **Note:** When entering a number manually, make sure it exactly matches the number Signal uses for that sender. If unsure, have them send a message first and use the **Recent messages** click-to-whitelist flow instead.
 
 ---
 
@@ -121,7 +137,7 @@ Once the companion integration is configured, the following entities appear in H
 
 **Messages not received**
 - Ensure the account is fully linked (status pill shows "Connected").
-- Check that the sender's phone number is in your chat-partner list, or disable the known-senders allowlist in the Web UI Settings.
+- Check that the sender appears in the **Recent messages** card. If they do, click **"Add as chat partner"** to whitelist them with their exact number. Alternatively, disable the known-senders allowlist in the Web UI **Settings**.
 - Check the **Log** tab for errors from signal-cli.
 
 **High CPU or RAM usage**
