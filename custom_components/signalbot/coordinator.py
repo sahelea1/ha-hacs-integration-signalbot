@@ -2,7 +2,9 @@
 
 The coordinator reads everything from the companion add-on's manager API at
 runtime (number, the bundled signal-cli-rest-api base URL, recipients, polling
-preferences) and then polls signal-cli-rest-api directly for incoming messages.
+preferences) and consumes incoming messages from the manager's message buffer.
+The signal-cli-rest-api client is still derived so notify entities and the
+send_message service can send messages.
 """
 from __future__ import annotations
 
@@ -33,10 +35,6 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Only "normal" (and "native") modes support HTTP GET polling on /v1/receive.
-# In json-rpc modes the receive endpoint is WebSocket-only, so polling is skipped.
-_HTTP_RECEIVE_MODES = frozenset({"normal", "native"})
-
 
 class SignalbotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator that reads add-on config and polls for incoming messages."""
@@ -63,8 +61,8 @@ class SignalbotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._api_client: SignalApiClient | None = None
         self.number: str | None = None
         self.api_url: str | None = None
-        # One-time-warning guard so log lines are not spammed on every poll.
-        self._jsonrpc_warned: bool = False
+        # Cursor of the highest message id consumed from the manager buffer.
+        self._msg_cursor: int | None = None
 
     # ------------------------------------------------------------------
     # Helpers
@@ -148,22 +146,13 @@ class SignalbotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.hass.config_entries.async_reload(self.entry.entry_id)
                 )
 
-        # Receive incoming messages (best effort; never fails the update).
-        if linked and self._api_client is not None:
-            if mode in _HTTP_RECEIVE_MODES:
-                self._jsonrpc_warned = False
-                await self._async_receive(
-                    number, recipients, bool(known_senders_only)
-                )
-            elif not self._jsonrpc_warned:
-                self._jsonrpc_warned = True
-                _LOGGER.warning(
-                    "Signalbot message receiving requires signal-cli-rest-api "
-                    "MODE=normal, but it is running in '%s' mode (WebSocket-only "
-                    "receive). The add-on defaults to normal mode; receiving is "
-                    "skipped.",
-                    mode,
-                )
+        # Consume incoming messages from the manager (best effort; never fails
+        # the update). The manager is now the single drainer of signal-cli's
+        # destructive receive queue.
+        if linked:
+            await self._async_consume_messages(
+                recipients, bool(known_senders_only)
+            )
 
         return {
             "healthy": True,
@@ -178,75 +167,78 @@ class SignalbotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "last_message": self.last_message,
         }
 
-    async def _async_receive(
+    async def _async_consume_messages(
         self,
-        number: str | None,
         recipients: list[dict[str, Any]],
         known_senders_only: bool,
     ) -> None:
-        """Poll for incoming messages and fire events for text messages.
+        """Consume buffered incoming messages from the manager and fire events.
 
         Receiving errors are logged but never fail the overall update.
         """
-        if not number or self._api_client is None:
-            return
-
         try:
-            envelopes = await self._api_client.async_receive(number)
-        except SignalApiError as err:
-            _LOGGER.debug("Error while receiving Signal messages: %s", err)
-            return
+            try:
+                result = await self.manager_client.async_get_messages(
+                    self._msg_cursor
+                )
+            except SignalApiError as err:
+                _LOGGER.debug("Error while consuming Signal messages: %s", err)
+                return
 
-        for item in envelopes:
-            if not isinstance(item, dict):
-                continue
-            envelope = item.get("envelope")
-            if not isinstance(envelope, dict):
-                continue
-            data_message = envelope.get("dataMessage")
-            # Ignore receipts/typing/sync messages: only handle text data messages.
-            if not isinstance(data_message, dict):
-                continue
-            text = data_message.get("message")
-            if not text:
-                continue
+            messages = result.get("messages") or []
+            last_id = result.get("last_id")
 
-            source: str | None = envelope.get("source") or envelope.get("sourceNumber")
-            source_uuid: str | None = envelope.get("sourceUuid")
+            # First run: adopt the current high-water mark without firing the
+            # backlog so old messages don't refire on startup.
+            if self._msg_cursor is None:
+                self._msg_cursor = last_id if isinstance(last_id, int) else 0
+                return
 
-            matched = match_recipient(recipients, source, source_uuid)
+            # Manager restarted (counter reset lower) → resync the cursor and
+            # avoid duplicate fires.
+            if isinstance(last_id, int) and last_id < self._msg_cursor:
+                self._msg_cursor = last_id
+                return
 
-            if known_senders_only and matched is None:
-                # Sender is not in the configured recipients list — silently ignore.
-                continue
+            for m in messages:
+                if not isinstance(m, dict):
+                    continue
 
-            recipient_id = matched.get(CONF_ID) if matched else None
-            recipient_name = matched.get(CONF_RECIPIENT_NAME) if matched else None
+                if isinstance(m.get("id"), int):
+                    self._msg_cursor = max(self._msg_cursor, m["id"])
 
-            stripped = text.strip()
-            if stripped.startswith("/"):
-                parts = stripped.split(maxsplit=1)
-                command: str | None = parts[0].lower()
-                command_args: str | None = parts[1].strip() if len(parts) > 1 else ""
-            else:
-                command = None
-                command_args = None
+                source = m.get("source")
+                source_uuid = m.get("source_uuid")
 
-            message: dict[str, Any] = {
-                "source": source,
-                "source_uuid": source_uuid,
-                "source_name": envelope.get("sourceName"),
-                "message": text,
-                "timestamp": envelope.get("timestamp"),
-                "recipient_id": recipient_id,
-                "recipient_name": recipient_name,
-                "command": command,
-                "command_args": command_args,
-            }
+                matched = match_recipient(recipients, source, source_uuid)
 
-            self.last_message = message
+                if known_senders_only and matched is None:
+                    # Sender is not in the configured recipients — silently ignore.
+                    continue
 
-            self.hass.bus.async_fire(
-                EVENT_MESSAGE_RECEIVED,
-                {**message, "config_entry_id": self.entry.entry_id},
-            )
+                recipient_id = matched.get(CONF_ID) if matched else None
+                recipient_name = (
+                    matched.get(CONF_RECIPIENT_NAME) if matched else None
+                )
+
+                message: dict[str, Any] = {
+                    "source": source,
+                    "source_uuid": source_uuid,
+                    "source_name": m.get("source_name"),
+                    "message": m.get("message"),
+                    "timestamp": m.get("timestamp"),
+                    "recipient_id": recipient_id,
+                    "recipient_name": recipient_name,
+                    "command": m.get("command"),
+                    "command_args": m.get("command_args"),
+                }
+
+                self.last_message = message
+
+                self.hass.bus.async_fire(
+                    EVENT_MESSAGE_RECEIVED,
+                    {**message, "config_entry_id": self.entry.entry_id},
+                )
+        except Exception as err:  # noqa: BLE001
+            # Receiving must never fail the whole update.
+            _LOGGER.debug("Unexpected error while consuming Signal messages: %s", err)

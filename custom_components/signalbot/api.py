@@ -427,3 +427,53 @@ class SignalManagerClient:
             )
 
         return result
+
+    async def async_get_messages(self, since: int | None = None) -> dict[str, Any]:
+        """Return buffered incoming messages from the add-on manager.
+
+        Endpoint: GET {manager_url}/api/messages[?since=<id>]
+
+        Args:
+            since: When provided, only messages with ``id > since`` are
+                returned (ascending by id). When ``None``, all buffered
+                messages are returned.
+
+        Returns:
+            The decoded JSON dict, e.g. ``{"messages": [...], "last_id": int}``.
+
+        Raises:
+            SignalApiConnectionError: On network-level failures.
+            SignalApiResponseError: On HTTP 4xx / 5xx responses or a non-dict
+                body.
+        """
+        url = f"{self._manager_url}/api/messages"
+        params = {"since": since} if since is not None else None
+
+        try:
+            async with self._session.request(
+                "GET",
+                url,
+                params=params,
+                timeout=_MANAGER_TIMEOUT,
+            ) as response:
+                if response.status < 200 or response.status >= 300:
+                    try:
+                        body = await response.text()
+                    except Exception:  # noqa: BLE001
+                        body = ""
+                    raise SignalApiResponseError(response.status, body)
+
+                result = await response.json(content_type=None)
+        except SignalApiError:
+            raise
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            raise SignalApiConnectionError(
+                f"Cannot connect to Signalbot add-on manager at {url}: {err}"
+            ) from err
+
+        if not isinstance(result, dict):
+            raise SignalApiResponseError(
+                200, f"Manager /api/messages returned a non-object body: {result!r}"
+            )
+
+        return result
