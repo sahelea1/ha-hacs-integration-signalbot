@@ -173,6 +173,20 @@ def save_config(cfg: dict[str, Any]) -> None:
 # signal-cli-rest-api helpers
 # --------------------------------------------------------------------------- #
 
+# Serializes *every* call that spawns/locks signal-cli (e.g. /v1/accounts,
+# /v1/qrcodelink). In per-request modes (normal/native) signal-cli takes an
+# exclusive lock on the account config file; if two invocations overlap they
+# queue on that lock and latency spirals (observed: 15s -> 30s -> 60s+). By
+# holding this lock we guarantee the manager never issues more than one such
+# call at a time, so they run back-to-back instead of piling up.
+_SIGNAL_CLI_LOCK = threading.Lock()
+
+# /v1/accounts can be slow in normal mode (a fresh JVM per call, ~15-30s) — a
+# short timeout would make us miss the linked account entirely. Serialized by
+# _SIGNAL_CLI_LOCK so it never overlaps another signal-cli call.
+ACCOUNTS_TIMEOUT: float = 30.0
+
+
 def _http_get_json(url: str, timeout: float = 5.0) -> Any:
     req = urlrequest.Request(url, method="GET")
     with urlrequest.urlopen(req, timeout=timeout) as resp:
@@ -180,7 +194,11 @@ def _http_get_json(url: str, timeout: float = 5.0) -> Any:
 
 
 def signal_about() -> dict[str, Any] | None:
-    """Return parsed /v1/about, or None if unreachable."""
+    """Return parsed /v1/about, or None if unreachable.
+
+    ``/v1/about`` is served directly by the Go wrapper (it does not invoke
+    signal-cli), so it is fast in all modes and is *not* serialized.
+    """
     try:
         data = _http_get_json(f"{SIGNAL_API_URL}/v1/about", timeout=4.0)
         return data if isinstance(data, dict) else None
@@ -192,7 +210,10 @@ def signal_about() -> dict[str, Any] | None:
 def signal_accounts() -> list[str] | None:
     """Return linked accounts list (possibly empty), or None if unreachable."""
     try:
-        data = _http_get_json(f"{SIGNAL_API_URL}/v1/accounts", timeout=4.0)
+        with _SIGNAL_CLI_LOCK:
+            data = _http_get_json(
+                f"{SIGNAL_API_URL}/v1/accounts", timeout=ACCOUNTS_TIMEOUT
+            )
         if isinstance(data, list):
             return [str(x) for x in data]
         return None
@@ -266,8 +287,11 @@ def signal_qrcode(device_name: str) -> bytes | None:
     url = f"{SIGNAL_API_URL}/v1/qrcodelink?{qs}"
     try:
         req = urlrequest.Request(url, method="GET")
-        with urlrequest.urlopen(req, timeout=QR_FETCH_TIMEOUT) as resp:
-            return resp.read()
+        # Serialized with the rest of the signal-cli calls to avoid the
+        # account config-file lock contention that spirals latency.
+        with _SIGNAL_CLI_LOCK:
+            with urlrequest.urlopen(req, timeout=QR_FETCH_TIMEOUT) as resp:
+                return resp.read()
     except (urlerror.URLError, OSError) as exc:
         log(f"qrcode unreachable: {exc!r}")
         return None
